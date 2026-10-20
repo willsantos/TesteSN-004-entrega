@@ -2,4 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/TechJobs.Api/TechJobs.Api.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TechJobs.UnitTests/TechJobs.UnitTests.csproj" />
+    <Project Path="tests/TechJobs.IntegrationTests/TechJobs.IntegrationTests.csproj" />
+  </Folder>
 </Solution>
