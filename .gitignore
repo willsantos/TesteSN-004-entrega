@@ -7,3 +7,4 @@ package-lock.json
 *.user
 .vs/
 .idea/
+docker-compose.override.yml

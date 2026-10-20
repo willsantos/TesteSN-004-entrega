@@ -1,10 +1,10 @@
 name: ci
 
-# Smoke test da entrega: garante que `docker compose up` sobe API, PostgreSQL,
-# Redis, Elasticsearch e frontend, e que GET /health responde. Este é o
-# pré-requisito mínimo — a avaliação real usa uma suíte automatizada contra o
-# contrato de API do README, então mantenha rotas, portas e campos exatamente
-# como especificado.
+# Smoke + testes: garante que `docker compose up` sobe API, PostgreSQL, Redis,
+# Elasticsearch e frontend; valida /health, o frontend, os testes de unidade e a
+# suíte de integração black-box contra o contrato de API do README. Este é o
+# pré-requisito mínimo — a avaliação final usa suíte adicional, então mantenha
+# rotas, portas e campos exatamente como especificado.
 
 on:
   push:
@@ -13,9 +13,17 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Testes de unidade (validação, chave de cache, seed)
+        run: dotnet test backend/TechJobs.slnx --filter "FullyQualifiedName~UnitTests"
 
       - name: Sobe a stack
         run: docker compose up -d --build
@@ -34,6 +42,11 @@ jobs:
 
       - name: Frontend responde
         run: curl -sf http://localhost:3000/ >/dev/null
+
+      - name: Testes de integração (contrato de API, cache, falhas simuladas)
+        env:
+          TECHJOBS_API: 'http://localhost:8080'
+        run: dotnet test backend/TechJobs.slnx --filter "FullyQualifiedName~IntegrationTests"
 
       - name: Logs em caso de falha
         if: failure()

@@ -1,0 +1,190 @@
+# Azure DevOps — TechJobs (catálogo de vagos com busca e cache)
+#
+# Pipeline lido como código (o repositório vive no GitHub, então ele não executa aqui —
+# ver docs/pipeline-evidence.md). Stages: Build → Test → Package → DeployStaging →
+# DeployProduction. Deployments usam `environment`; a aprovação de produção é um
+# check configurado NO ENVIRONMENT do Azure DevOps (Pipelines → Environments →
+# techjobs-prod → Approvals and checks) — não é declarável em YAML.
+#
+# Falha de teste em qualquer stage de Test interrompe o pipeline: os stages de
+# Package/Deploy têm `dependsOn` nos stages de teste, então nenhum deploy acontece.
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - README.md
+      - docs/**
+
+pr: none # no GitHub usamos as GitHub Actions para validação de PR; em Azure Repos use Branch Policies (ver docs)
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: dotnetSolution
+    value: 'backend/TechJobs.slnx'
+  - name: apiProject
+    value: 'backend/src/TechJobs.Api/TechJobs.Api.csproj'
+  - name: artifactName
+    value: 'techjobs-api'
+  # Segredos NUNCA aqui: variable groups vinculam segredos do Key Vault (ver docs/pipeline-evidence.md).
+  - group: techjobs-common # conexão de serviço, versão de imagem, ACR (sem segredos)
+
+stages:
+  # ---------------------------------------------------------------- Build
+  - stage: Build
+    displayName: 'Build'
+    jobs:
+      - job: Backend
+        displayName: 'Backend — restore + build + testes de unidade'
+        steps:
+          - template: pipelines/templates/dotnet-build-test.yml
+            parameters:
+              projectName: Backend
+
+      - job: Frontend
+        displayName: 'Frontend — build React'
+        steps:
+            - task: NodeTool@0
+              inputs:
+                versionSpec: '24.x'
+            - script: npm install
+              workingDirectory: frontend
+              displayName: 'npm install'
+            - script: npm run build
+              workingDirectory: frontend
+              displayName: 'npm run build (tsc + vite)'
+
+  # ---------------------------------------------------------------- Test
+  - stage: Test
+    displayName: 'Test'
+    dependsOn: Build
+    jobs:
+      - job: IntegrationTests
+        displayName: 'Testes de integração black-box (docker compose)'
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              version: '10.0.x'
+          - script: docker compose up -d --build
+            displayName: 'Sobe a stack completa'
+          - script: |
+              deadline=$((SECONDS + 240))
+              until curl -sf http://localhost:8080/health >/dev/null; do
+                if (( SECONDS > deadline )); then echo "API não saudável"; docker compose logs --tail 100; exit 1; fi
+                sleep 3
+              done
+            displayName: 'Aguarda API saudável'
+          - task: DotNetCoreCLI@2
+            displayName: 'dotnet test (integração)'
+            inputs:
+              command: 'test'
+              projects: 'backend/tests/TechJobs.IntegrationTests/TechJobs.IntegrationTests.csproj'
+              arguments: '--logger trx --results-directory $(Agent.TempDirectory)'
+            env:
+              TECHJOBS_API: 'http://localhost:8080'
+          - task: PublishTestResults@2
+            displayName: 'Publicar resultados'
+            condition: succeededOrFailed()
+            inputs:
+              testRunner: 'VSTest'
+              testResultsFiles: '$(Agent.TempDirectory)/*.trx'
+              testRunTitle: 'Integração — contrato de API'
+          - script: docker compose down -v
+            condition: always()
+            displayName: 'Derruba a stack'
+
+  # ---------------------------------------------------------------- Package
+  - stage: Package
+    displayName: 'Package'
+    dependsOn: Test # teste falho ⇒ sem artefato ⇒ sem deploy
+    jobs:
+      - job: PublishArtifact
+        displayName: 'Artefato versionado e imutável'
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              version: '10.0.x'
+          - task: DotNetCoreCLI@2
+            displayName: 'Publish'
+            inputs:
+              command: 'publish'
+              projects: '$(apiProject)'
+              arguments: '--configuration Release --output $(Build.ArtifactStagingDirectory)/api'
+          - task: Powershell@2
+            displayName: 'Grava versão (BuildId + SHA)'
+            inputs:
+              targetType: 'inline'
+              script: |
+                "$env:BUILD_BUILDNUMBER ($env:BUILD_SOURCEVERSIONSUBSTRING)" | Out-File "$(Build.ArtifactStagingDirectory)/api/VERSION.txt"
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publica artefato'
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)/api'
+              artifactName: '$(artifactName)'
+          # Para registro de contêiner, troque por docker build + push para o ACR
+          # referenciando a service connection (credenciais ficam na service connection).
+          - script: |
+              docker build -t $(registryServer)/techjobs-api:$(Build.BuildId) backend
+              docker push $(registryServer)/techjobs-api:$(Build.BuildId)
+            displayName: 'Build + push da imagem (ACR via service connection)'
+
+  # ---------------------------------------------------------------- DeployStaging
+  - stage: DeployStaging
+    displayName: 'Deploy — Staging'
+    dependsOn: Package
+    jobs:
+      - deployment: Staging
+        displayName: 'Deploy staging'
+        environment: 'techjobs-staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: '$(artifactName)'
+                # Deploy real (Web App / AKS / VM) via service connection — as
+                # credenciais vivem na service connection, não no YAML.
+                - script: |
+                    echo "Deploy da imagem $(registryServer)/techjobs-api:$(Build.BuildId) em staging"
+                    echo "kubectl set image deployment/techjobs-api api=$(registryServer)/techjobs-api:$(Build.BuildId) -n staging"
+                  displayName: 'Deploy (staging)'
+                - script: |
+                    deadline=$((SECONDS + 120))
+                    until curl -sf $(stagingHealthUrl)/health >/dev/null; do
+                      if (( SECONDS > deadline )); then echo "health check falhou"; exit 1; fi
+                      sleep 5
+                    done
+                    echo "Staging saudável."
+                  displayName: 'Smoke test pós-deploy'
+
+  # ---------------------------------------------------------------- DeployProduction
+  - stage: DeployProduction
+    displayName: 'Deploy — Production'
+    dependsOn: DeployStaging
+    jobs:
+      - deployment: Production
+        displayName: 'Deploy produção (requer aprovação no environment)'
+        # A aprovação é um CHECK do environment 'techjobs-prod' configurado na UI
+        # do Azure DevOps (Approvals: grupo responsável + timeout). O pipeline
+        # fica pausado aqui até um aprovador liberar.
+        environment: 'techjobs-prod'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: '$(artifactName)'
+                - script: |
+                    echo "Deploy da imagem $(registryServer)/techjobs-api:$(Build.BuildId) em produção"
+                    echo "kubectl set image deployment/techjobs-api api=$(registryServer)/techjobs-api:$(Build.BuildId) -n prod"
+                  displayName: 'Deploy (produção)'
+                - script: |
+                    deadline=$((SECONDS + 120))
+                    until curl -sf $(prodHealthUrl)/health >/dev/null; do
+                      if (( SECONDS > deadline )); then echo "health check falhou — iniciar rollback"; exit 1; fi
+                      sleep 5
+                    done
+                  displayName: 'Smoke test pós-deploy'

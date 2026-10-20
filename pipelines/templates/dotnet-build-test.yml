@@ -1,0 +1,51 @@
+# Template reutilizável: restore + build + testes do backend .NET.
+#
+# Parâmetros:
+#   projectName — nome de exibição do job/stage
+#
+# Uso:
+#   - template: pipelines/templates/dotnet-build-test.yml
+#     parameters:
+#       projectName: Backend
+parameters:
+  - name: projectName
+    type: string
+
+steps:
+  - task: UseDotNet@2
+    displayName: 'Instalar .NET 10 SDK'
+    inputs:
+      version: '10.0.x'
+
+  - task: DotNetCoreCLI@2
+    displayName: 'Restore'
+    inputs:
+      command: 'restore'
+      projects: 'backend/TechJobs.slnx'
+      feedsToUse: 'select'
+      vstsFeed: '' # NuGet público; troque por feed privado se os pacotes forem internos
+
+  - task: DotNetCoreCLI@2
+    displayName: 'Build (Release)'
+    inputs:
+      command: 'build'
+      projects: 'backend/TechJobs.slnx'
+      arguments: '--configuration Release --no-restore'
+
+  # Testes de unidade rodam em qualquer agente (sem dependências externas).
+  # Os testes de integração são black-box contra `docker compose up` e executam
+  # no stage de Test (job dedicado), não aqui.
+  - task: DotNetCoreCLI@2
+    displayName: 'Testes de unidade'
+    inputs:
+      command: 'test'
+      projects: 'backend/tests/TechJobs.UnitTests/TechJobs.UnitTests.csproj'
+      arguments: '--configuration Release --no-build --logger trx --results-directory $(Agent.TempDirectory)'
+
+  - task: PublishTestResults@2
+    displayName: 'Publicar resultados de teste'
+    condition: succeededOrFailed()
+    inputs:
+      testRunner: 'VSTest'
+      testResultsFiles: '$(Agent.TempDirectory)/*.trx'
+      testRunTitle: '${{ parameters.projectName }} — unit tests'
