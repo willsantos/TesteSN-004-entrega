@@ -3,6 +3,9 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 COPY . .
+# VITE_API_URL pode ser sobrescrito em build (padrão: http://localhost:8080).
+ARG VITE_API_URL=http://localhost:8080
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 FROM nginx:1.27-alpine
