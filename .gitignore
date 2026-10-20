@@ -1,0 +1,9 @@
+bin/
+obj/
+node_modules/
+dist/
+package-lock.json
+*.tsbuildinfo
+*.user
+.vs/
+.idea/

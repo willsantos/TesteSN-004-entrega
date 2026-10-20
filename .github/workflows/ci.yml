@@ -1,0 +1,44 @@
+name: ci
+
+# Smoke test da entrega: garante que `docker compose up` sobe API, PostgreSQL,
+# Redis, Elasticsearch e frontend, e que GET /health responde. Este é o
+# pré-requisito mínimo — a avaliação real usa uma suíte automatizada contra o
+# contrato de API do README, então mantenha rotas, portas e campos exatamente
+# como especificado.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sobe a stack
+        run: docker compose up -d --build
+
+      - name: Aguarda API saudável (GET /health)
+        run: |
+          deadline=$((SECONDS + 180))
+          until curl -sf http://localhost:8080/health >/dev/null; do
+            if (( SECONDS > deadline )); then
+              echo "API não respondeu em /health dentro de 180s"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "API saudável."
+
+      - name: Frontend responde
+        run: curl -sf http://localhost:3000/ >/dev/null
+
+      - name: Logs em caso de falha
+        if: failure()
+        run: docker compose logs --tail 100
+
+      - name: Derruba a stack
+        if: always()
+        run: docker compose down -v
