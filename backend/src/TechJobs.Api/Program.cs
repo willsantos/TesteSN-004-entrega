@@ -3,11 +3,11 @@ using Elastic.Transport;
 using Npgsql;
 using StackExchange.Redis;
 using TechJobs.Api.Contracts;
-using TechJobs.Api.Endpoints;
 using TechJobs.Api.JobsCore.Persistence;
 using TechJobs.Api.Platform;
 using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
+using TechJobs.Api.Operations;
 using TechJobs.Api.Services;
 using TechJobs.Api.Slices.CreateJob;
 using TechJobs.Api.Slices.GetJobById;
@@ -56,7 +56,6 @@ builder.Services.AddSingleton<ElasticIndex>();
 builder.Services.AddSingleton<SearchQueryRunner>();
 builder.Services.AddSingleton<JobStatsRunner>();
 builder.Services.AddSingleton<IndexingQueue>();
-builder.Services.AddSingleton<AdminService>();
 builder.Services.AddSingleton<IndexingWorker>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IndexingWorker>());
 builder.Services.AddHostedService<StartupInitializer>();
@@ -77,7 +76,14 @@ app.MapJobStatsEndpoint();
 
 // Endpoints dev-only: só existem (e só devem existir) com ENABLE_TEST_ENDPOINTS=true.
 if (enableTestEndpoints)
-    app.MapAdminEndpoints();
+{
+    app.MapResetEndpoint();
+    app.MapSeedEndpoint();
+    app.MapFaultsEndpoint();
+    app.MapCacheStatsEndpoint();
+    app.MapDrainEndpoint();
+    app.MapReindexEndpoint();
+}
 
 // OpenAPI + página Swagger (contratos visíveis em /swagger).
 app.MapOpenApi();

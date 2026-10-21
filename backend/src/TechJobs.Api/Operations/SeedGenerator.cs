@@ -1,6 +1,6 @@
 using TechJobs.Api.JobsCore;
 
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Operations;
 
 /// <summary>
 /// Seed determinístico de vagas sintéticas: mesmo (count, seed) produz exatamente o mesmo
