@@ -1,8 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
-using TechJobs.Api.Contracts;
 
-namespace TechJobs.Api.Endpoints;
+namespace TechJobs.Api.Contracts;
 
 /// <summary>
 /// Converte exceções em Problem Details (RFC 9457): 400 validação, 404 vaga ausente,

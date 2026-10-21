@@ -1,30 +1,24 @@
 using System.Text.Json;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore;
+using TechJobs.Api.JobsCore.Persistence;
 using TechJobs.Api.Services;
 
-namespace TechJobs.Api.Endpoints;
+namespace TechJobs.Api.Slices.CreateJob;
 
-public static class JobsEndpoints
+public static class CreateJobEndpoint
 {
-    public static void MapJobsEndpoints(this IEndpointRouteBuilder app)
+    public static void MapCreateJobEndpoint(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/jobs");
-
-        group.MapPost("", async (HttpRequest request, JobsService jobs) =>
+        app.MapPost("/api/jobs", async (HttpRequest request, JobStore store, IndexingQueue indexingQueue) =>
         {
             var body = await ReadJobRequestAsync(request);
             var validated = ValidateOrThrow(body);
-            var job = await jobs.CreateAsync(validated, request.HttpContext.RequestAborted);
+            // Escrita confirmada no PostgreSQL ANTES de qualquer resposta de sucesso.
+            // A indexação é eventual (outbox + worker): nunca bloqueia nem falha o POST.
+            var job = await store.CreateAsync(Guid.NewGuid(), validated, DateTime.UtcNow, request.HttpContext.RequestAborted);
+            indexingQueue.Wake(job.Id);
             return Results.Created($"/api/jobs/{job.Id}", JobResponse.From(job));
-        });
-
-        group.MapPut("/{id:guid}", async (Guid id, HttpRequest request, JobsService jobs) =>
-        {
-            var body = await ReadJobRequestAsync(request);
-            var validated = ValidateOrThrow(body);
-            var job = await jobs.ReplaceAsync(id, validated, request.HttpContext.RequestAborted);
-            return Results.Ok(JobResponse.From(job));
         });
     }
 

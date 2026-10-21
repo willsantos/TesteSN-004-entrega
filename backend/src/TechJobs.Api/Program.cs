@@ -2,15 +2,18 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Npgsql;
 using StackExchange.Redis;
+using TechJobs.Api.Contracts;
 using TechJobs.Api.Endpoints;
 using TechJobs.Api.JobsCore.Persistence;
 using TechJobs.Api.Platform;
 using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
 using TechJobs.Api.Services;
+using TechJobs.Api.Slices.CreateJob;
 using TechJobs.Api.Slices.GetJobById;
 using TechJobs.Api.Slices.JobStats;
 using TechJobs.Api.Slices.SearchJobs;
+using TechJobs.Api.Slices.UpdateJob;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,7 +56,6 @@ builder.Services.AddSingleton<ElasticIndex>();
 builder.Services.AddSingleton<SearchQueryRunner>();
 builder.Services.AddSingleton<JobStatsRunner>();
 builder.Services.AddSingleton<IndexingQueue>();
-builder.Services.AddSingleton<JobsService>();
 builder.Services.AddSingleton<AdminService>();
 builder.Services.AddSingleton<IndexingWorker>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IndexingWorker>());
@@ -67,7 +69,8 @@ app.UseCors();
 // Obrigatório para a suíte de avaliação: 200 quando a API está pronta.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-app.MapJobsEndpoints();
+app.MapCreateJobEndpoint();
+app.MapUpdateJobEndpoint();
 app.MapGetJobByIdEndpoint();
 app.MapSearchJobsEndpoint();
 app.MapJobStatsEndpoint();
