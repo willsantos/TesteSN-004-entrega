@@ -1,43 +1,28 @@
-using System.Text.Json;
-using Microsoft.Extensions.Logging;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore;
 using TechJobs.Api.JobsCore.Persistence;
-using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
 
 namespace TechJobs.Api.Services;
 
 /// <summary>
-/// Orquestra PostgreSQL (verdade), Redis (cache) e Elasticsearch (busca) nos fluxos da API.
-///leituras públicas devolvem JSON pronto (o cache armazena exatamente o que será respondido).
+/// Orquestra PostgreSQL (verdade) e Redis (cache) nos fluxos de escrita da API.
+///leituras públicas vivem nos slices (Slices/*) e devolvem JSON pronto.
 /// </summary>
 public sealed class JobsService
 {
     private readonly JobStore _repo;
     private readonly CacheService _cache;
-    private readonly ElasticIndex _elastic;
-    private readonly SearchCacheGeneration _generation;
-    private readonly CacheOptions _cacheOptions;
     private readonly IndexingQueue _indexingQueue;
-    private readonly ILogger<JobsService> _logger;
 
     public JobsService(
         JobStore repo,
         CacheService cache,
-        ElasticIndex elastic,
-        SearchCacheGeneration generation,
-        CacheOptions cacheOptions,
-        IndexingQueue indexingQueue,
-        ILogger<JobsService> logger)
+        IndexingQueue indexingQueue)
     {
         _repo = repo;
         _cache = cache;
-        _elastic = elastic;
-        _generation = generation;
-        _cacheOptions = cacheOptions;
         _indexingQueue = indexingQueue;
-        _logger = logger;
     }
 
     public async Task<Job> CreateAsync(ValidatedJob job, CancellationToken ct = default)
@@ -58,53 +43,4 @@ public sealed class JobsService
         _indexingQueue.Wake(id);
         return updated;
     }
-
-    /// <summary>Cache-aside no detalhe: hit → Redis; miss → PostgreSQL → popula cache (TTL configurável).</summary>
-    public async Task<string> GetJobJsonAsync(Guid id, CancellationToken ct = default)
-    {
-        var key = CacheKeys.DetailsKey(id);
-        var (outcome, cached) = await _cache.GetStringAsync(key, CacheCounters.Kind.Details);
-        if (outcome == CacheOutcome.Hit && cached is not null)
-            return cached;
-
-        var job = await _repo.GetByIdAsync(id, ct) ?? throw new JobNotFoundException(id);
-
-        var json = JsonSerializer.Serialize(JobResponse.From(job), ApiJson.Options);
-        if (outcome == CacheOutcome.Miss)
-            await _cache.SetStringAsync(key, json, TimeSpan.FromSeconds(_cacheOptions.DetailsTtlSeconds), CacheCounters.Kind.Details);
-        // outcome == Error: Redis indisponível — responde pelo PostgreSQL, sem tentar popular.
-        return json;
-    }
-
-    /// <summary>Busca pública: cache de resultado por chave canônica; sem cache → Elasticsearch.</summary>
-    public async Task<string> SearchJsonAsync(SearchQueryParams p, CancellationToken ct = default)
-    {
-        var key = CacheKeys.SearchKey(_generation.Current, p);
-        var (outcome, cached) = await _cache.GetStringAsync(key, CacheCounters.Kind.Search);
-        if (outcome == CacheOutcome.Hit && cached is not null)
-            return cached;
-
-        var result = await _elastic.SearchAsync(p, ct); // 503 Problem Details se indisponível
-
-        var response = new SearchResponse(
-            p.Page,
-            p.PageSize,
-            result.Total,
-            result.Items.Select(d => new SearchItemResponse(
-                d.Id, d.Title, d.Company, d.Seniority, d.WorkMode, d.City,
-                d.Technologies,
-                ToDecimal(d.SalaryMin), ToDecimal(d.SalaryMax),
-                DateTime.SpecifyKind(d.PublishedAt, DateTimeKind.Utc))).ToList());
-
-        var json = JsonSerializer.Serialize(response, ApiJson.Options);
-        if (outcome == CacheOutcome.Miss)
-            await _cache.SetStringAsync(key, json, TimeSpan.FromSeconds(_cacheOptions.SearchTtlSeconds), CacheCounters.Kind.Search);
-        return json;
-    }
-
-    public async Task<JobsStats> StatsAsync(CancellationToken ct = default) =>
-        await _elastic.StatsAsync(ct);
-
-    private static decimal? ToDecimal(double? value) =>
-        value is null ? null : (decimal)value;
 }

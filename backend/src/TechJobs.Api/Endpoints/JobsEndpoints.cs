@@ -1,6 +1,5 @@
 using System.Text.Json;
 using TechJobs.Api.Contracts;
-using TechJobs.Api.Domain;
 using TechJobs.Api.JobsCore;
 using TechJobs.Api.Services;
 
@@ -27,24 +26,6 @@ public static class JobsEndpoints
             var job = await jobs.ReplaceAsync(id, validated, request.HttpContext.RequestAborted);
             return Results.Ok(JobResponse.From(job));
         });
-
-        group.MapGet("/{id:guid}", async (Guid id, JobsService jobs) =>
-        {
-            var json = await jobs.GetJobJsonAsync(id);
-            return Results.Content(json, "application/json");
-        });
-
-        group.MapGet("/search", async (HttpRequest request, JobsService jobs) =>
-        {
-            var parameters = SearchRequestParser.Parse(request.Query, out var errors);
-            if (errors.Count > 0)
-                throw new ValidationException(string.Join(' ', errors));
-            var json = await jobs.SearchJsonAsync(parameters, request.HttpContext.RequestAborted);
-            return Results.Content(json, "application/json");
-        });
-
-        group.MapGet("/stats", async (JobsService jobs) =>
-            Results.Json(await jobs.StatsAsync()));
     }
 
     private static async Task<JobRequest> ReadJobRequestAsync(HttpRequest request)

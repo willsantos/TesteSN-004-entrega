@@ -8,6 +8,9 @@ using TechJobs.Api.Platform;
 using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
 using TechJobs.Api.Services;
+using TechJobs.Api.Slices.GetJobById;
+using TechJobs.Api.Slices.JobStats;
+using TechJobs.Api.Slices.SearchJobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,6 +50,8 @@ builder.Services.AddSingleton(_ => new ElasticsearchClient(
     new ElasticsearchClientSettings(new Uri(elasticsearchUrl))
         .RequestTimeout(TimeSpan.FromSeconds(30))));
 builder.Services.AddSingleton<ElasticIndex>();
+builder.Services.AddSingleton<SearchQueryRunner>();
+builder.Services.AddSingleton<JobStatsRunner>();
 builder.Services.AddSingleton<IndexingQueue>();
 builder.Services.AddSingleton<JobsService>();
 builder.Services.AddSingleton<AdminService>();
@@ -63,6 +68,9 @@ app.UseCors();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapJobsEndpoints();
+app.MapGetJobByIdEndpoint();
+app.MapSearchJobsEndpoint();
+app.MapJobStatsEndpoint();
 
 // Endpoints dev-only: só existem (e só devem existir) com ENABLE_TEST_ENDPOINTS=true.
 if (enableTestEndpoints)

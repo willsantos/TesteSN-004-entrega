@@ -1,6 +1,7 @@
 using Xunit;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore;
+using TechJobs.Api.Slices.SearchJobs;
 
 namespace TechJobs.UnitTests;
 
@@ -19,8 +20,8 @@ public class SearchCacheKeyTests
     {
         var a = Params(q: "desenvolvedor c#", seniority: "pleno", technologies: ["redis", "c#"], page: 2, sort: "newest");
         var b = Params(q: "desenvolvedor c#", seniority: "pleno", technologies: ["redis", "c#"], page: 2, sort: "newest");
-        Assert.Equal(CacheKeys.CanonicalHash(a), CacheKeys.CanonicalHash(b));
-        Assert.Equal(CacheKeys.SearchKey(7, a), CacheKeys.SearchKey(7, b));
+        Assert.Equal(SearchCacheKey.CanonicalHash(a), SearchCacheKey.CanonicalHash(b));
+        Assert.Equal(SearchCacheKey.SearchKey(7, a), SearchCacheKey.SearchKey(7, b));
     }
 
     [Fact]
@@ -28,7 +29,7 @@ public class SearchCacheKeyTests
     {
         var a = Params(technologies: ["redis", "c#", "docker"]);
         var b = Params(technologies: ["docker", "c#", "redis"]);
-        Assert.Equal(CacheKeys.CanonicalHash(a), CacheKeys.CanonicalHash(b));
+        Assert.Equal(SearchCacheKey.CanonicalHash(a), SearchCacheKey.CanonicalHash(b));
     }
 
     [Theory]
@@ -54,7 +55,7 @@ public class SearchCacheKeyTests
             "minSalary" => a with { MinSalary = 300 },
             _ => a with { MaxSalary = 400 },
         };
-        Assert.NotEqual(CacheKeys.CanonicalHash(a), CacheKeys.CanonicalHash(b));
+        Assert.NotEqual(SearchCacheKey.CanonicalHash(a), SearchCacheKey.CanonicalHash(b));
     }
 
     [Fact]
@@ -62,7 +63,7 @@ public class SearchCacheKeyTests
     {
         var a = Params(technologies: ["redis"]);
         var b = Params(technologies: ["redis", "docker"]);
-        Assert.NotEqual(CacheKeys.CanonicalHash(a), CacheKeys.CanonicalHash(b));
+        Assert.NotEqual(SearchCacheKey.CanonicalHash(a), SearchCacheKey.CanonicalHash(b));
     }
 
     [Fact]
@@ -70,7 +71,7 @@ public class SearchCacheKeyTests
     {
         var a = Params(q: "Dev   Backend");
         var b = Params(q: "dev backend");
-        Assert.Equal(CacheKeys.CanonicalHash(a), CacheKeys.CanonicalHash(b));
+        Assert.Equal(SearchCacheKey.CanonicalHash(a), SearchCacheKey.CanonicalHash(b));
     }
 
     [Fact]
@@ -78,7 +79,7 @@ public class SearchCacheKeyTests
     {
         var a = Params(min: 6500.00m, max: 8500.50m);
         var b = Params(min: 6500m, max: 8500.5m);
-        Assert.Equal(CacheKeys.CanonicalHash(a), CacheKeys.CanonicalHash(b));
+        Assert.Equal(SearchCacheKey.CanonicalHash(a), SearchCacheKey.CanonicalHash(b));
     }
 
     [Fact]
@@ -93,6 +94,6 @@ public class SearchCacheKeyTests
     public void Chave_de_busca_inclui_geracao()
     {
         var p = Params(q: "x");
-        Assert.NotEqual(CacheKeys.SearchKey(1, p), CacheKeys.SearchKey(2, p));
+        Assert.NotEqual(SearchCacheKey.SearchKey(1, p), SearchCacheKey.SearchKey(2, p));
     }
 }

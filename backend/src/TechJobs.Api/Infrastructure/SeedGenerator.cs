@@ -1,4 +1,3 @@
-using TechJobs.Api.Domain;
 using TechJobs.Api.JobsCore;
 
 namespace TechJobs.Api.Infrastructure;

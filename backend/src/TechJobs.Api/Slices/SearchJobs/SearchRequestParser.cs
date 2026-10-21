@@ -2,7 +2,7 @@ using Microsoft.Extensions.Primitives;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore;
 
-namespace TechJobs.Api.Domain;
+namespace TechJobs.Api.Slices.SearchJobs;
 
 /// <summary>Converte a query string de /api/jobs/search em parâmetros validados (400 em entrada inválida).</summary>
 public static class SearchRequestParser

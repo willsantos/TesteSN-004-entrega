@@ -1,9 +1,9 @@
 using Xunit;
 using Microsoft.Extensions.Primitives;
 using TechJobs.Api.Contracts;
-using TechJobs.Api.Domain;
 using TechJobs.Api.Infrastructure;
 using TechJobs.Api.JobsCore;
+using TechJobs.Api.Slices.SearchJobs;
 
 namespace TechJobs.UnitTests;
 
