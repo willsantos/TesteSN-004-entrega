@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace TechJobs.Api.Domain;
+namespace TechJobs.Api.JobsCore;
 
 /// <summary>
 /// Corpo de POST/PUT. Campos de enum chegam como string e são validados manualmente

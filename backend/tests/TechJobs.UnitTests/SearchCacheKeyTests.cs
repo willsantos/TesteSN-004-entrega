@@ -1,6 +1,6 @@
 using Xunit;
-using TechJobs.Api.Domain;
-using TechJobs.Api.Infrastructure;
+using TechJobs.Api.Contracts;
+using TechJobs.Api.JobsCore;
 
 namespace TechJobs.UnitTests;
 

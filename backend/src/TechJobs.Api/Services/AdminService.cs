@@ -1,32 +1,34 @@
 using Microsoft.Extensions.Logging;
-using TechJobs.Api.Domain;
+using TechJobs.Api.Contracts;
 using TechJobs.Api.Infrastructure;
+using TechJobs.Api.JobsCore.Persistence;
+using TechJobs.Api.Platform.Elastic;
+using TechJobs.Api.Platform.Runtime;
 
 namespace TechJobs.Api.Services;
-
-/// <summary>Configuração de cache por ambiente (Cache__DetailsTtlSeconds / Cache__SearchTtlSeconds).</summary>
-public sealed record CacheOptions(int DetailsTtlSeconds, int SearchTtlSeconds);
 
 /// <summary>Operações dos endpoints dev-only (ENABLE_TEST_ENDPOINTS=true) — mecanismo de teste determinístico.</summary>
 public sealed class AdminService
 {
-    private readonly JobRepository _repo;
-    private readonly ElasticService _elastic;
+    private readonly JobStore _repo;
+    private readonly ElasticIndex _elastic;
     private readonly CacheService _cache;
     private readonly CacheCounters _counters;
     private readonly FaultState _faults;
     private readonly SearchCacheGeneration _generation;
     private readonly IndexingWorker _indexing;
+    private readonly Outbox _outbox;
     private readonly ILogger<AdminService> _logger;
 
     public AdminService(
-        JobRepository repo,
-        ElasticService elastic,
+        JobStore repo,
+        ElasticIndex elastic,
         CacheService cache,
         CacheCounters counters,
         FaultState faults,
         SearchCacheGeneration generation,
         IndexingWorker indexing,
+        Outbox outbox,
         ILogger<AdminService> logger)
     {
         _repo = repo;
@@ -36,6 +38,7 @@ public sealed class AdminService
         _faults = faults;
         _generation = generation;
         _indexing = indexing;
+        _outbox = outbox;
         _logger = logger;
     }
 
@@ -88,7 +91,7 @@ public sealed class AdminService
         await _elastic.DeleteAllDocumentsAsync(ct);
         await _elastic.IndexManyAsync(jobs, ct);
         await _elastic.RefreshAsync(ct);
-        await _repo.ClearOutboxAsync(ct);
+        await _outbox.ClearOutboxAsync(ct);
         _generation.Invalidate();
         return jobs.Count;
     }

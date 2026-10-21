@@ -4,10 +4,11 @@ using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.Core.Search;
 using Elastic.Clients.Elasticsearch.QueryDsl;
 using Microsoft.Extensions.Logging;
-using TechJobs.Api.Domain;
-using TechJobs.Api.Infrastructure.Elastic;
+using TechJobs.Api.Contracts;
+using TechJobs.Api.JobsCore;
+using TechJobs.Api.Platform.Runtime;
 
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Platform.Elastic;
 
 public sealed record SearchResult(long Total, IReadOnlyList<JobDoc> Items);
 
@@ -16,16 +17,16 @@ public sealed record SearchResult(long Total, IReadOnlyList<JobDoc> Items);
 /// primeiro e trata resposta inválida como indisponibilidade — a leitura pública
 /// devolve 503; a indexação (worker) apenas deixa o evento pendente no outbox.
 /// </summary>
-public sealed class ElasticService
+public sealed class ElasticIndex
 {
     public const string IndexName = "techjobs-v1";
     private const int BulkChunkSize = 2000;
 
     private readonly ElasticsearchClient _client;
     private readonly FaultState _faults;
-    private readonly ILogger<ElasticService> _logger;
+    private readonly ILogger<ElasticIndex> _logger;
 
-    public ElasticService(ElasticsearchClient client, FaultState faults, ILogger<ElasticService> logger)
+    public ElasticIndex(ElasticsearchClient client, FaultState faults, ILogger<ElasticIndex> logger)
     {
         _client = client;
         _faults = faults;

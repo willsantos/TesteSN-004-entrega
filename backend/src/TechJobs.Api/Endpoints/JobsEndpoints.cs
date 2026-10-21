@@ -1,5 +1,7 @@
 using System.Text.Json;
+using TechJobs.Api.Contracts;
 using TechJobs.Api.Domain;
+using TechJobs.Api.JobsCore;
 using TechJobs.Api.Services;
 
 namespace TechJobs.Api.Endpoints;

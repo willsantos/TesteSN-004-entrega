@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
-using TechJobs.Api.Domain;
 
-namespace TechJobs.Api.Infrastructure.Elastic;
+namespace TechJobs.Api.JobsCore;
 
 /// <summary>
 /// Projeção de busca (nunca fonte da verdade). Nomes de campo fixados com

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
-using TechJobs.Api.Domain;
+using TechJobs.Api.Contracts;
 
 namespace TechJobs.Api.Endpoints;
 

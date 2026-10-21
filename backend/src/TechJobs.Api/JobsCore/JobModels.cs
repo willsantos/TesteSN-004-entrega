@@ -1,4 +1,4 @@
-namespace TechJobs.Api.Domain;
+namespace TechJobs.Api.JobsCore;
 
 public enum Seniority { Junior, Pleno, Senior }
 public enum WorkMode { Remoto, Hibrido, Presencial }

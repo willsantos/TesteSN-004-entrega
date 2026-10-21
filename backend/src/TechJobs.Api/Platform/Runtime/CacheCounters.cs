@@ -1,4 +1,4 @@
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Platform.Runtime;
 
 /// <summary>
 /// Contadores de cache desde o último /admin/reset (exibidos em /admin/cache-stats).

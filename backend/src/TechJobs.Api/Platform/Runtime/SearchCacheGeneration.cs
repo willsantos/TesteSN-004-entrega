@@ -1,4 +1,4 @@
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Platform.Runtime;
 
 /// <summary>
 /// Geração do cache de busca: cada invalidação (seed/reset/drain/reindex) incrementa o

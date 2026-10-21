@@ -2,10 +2,11 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using Npgsql;
 using StackExchange.Redis;
-using TechJobs.Api.Domain;
 using TechJobs.Api.Endpoints;
-using TechJobs.Api.Infrastructure;
-using TechJobs.Api.Infrastructure.Elastic;
+using TechJobs.Api.JobsCore.Persistence;
+using TechJobs.Api.Platform;
+using TechJobs.Api.Platform.Elastic;
+using TechJobs.Api.Platform.Runtime;
 using TechJobs.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,7 +34,8 @@ builder.Services.AddSingleton<FaultState>();
 builder.Services.AddSingleton<CacheCounters>();
 builder.Services.AddSingleton<SearchCacheGeneration>();
 builder.Services.AddSingleton(_ => Database.CreateDataSource(postgresConnectionString));
-builder.Services.AddSingleton<JobRepository>();
+builder.Services.AddSingleton<Outbox>();
+builder.Services.AddSingleton<JobStore>();
 builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(sp =>
 {
     var options = ConfigurationOptions.Parse(redisConnectionString);
@@ -44,7 +46,7 @@ builder.Services.AddSingleton<CacheService>();
 builder.Services.AddSingleton(_ => new ElasticsearchClient(
     new ElasticsearchClientSettings(new Uri(elasticsearchUrl))
         .RequestTimeout(TimeSpan.FromSeconds(30))));
-builder.Services.AddSingleton<ElasticService>();
+builder.Services.AddSingleton<ElasticIndex>();
 builder.Services.AddSingleton<IndexingQueue>();
 builder.Services.AddSingleton<JobsService>();
 builder.Services.AddSingleton<AdminService>();
@@ -80,8 +82,8 @@ public partial class Program;
 /// (dependências sobem saudáveis pelo docker-compose, mas desempates não custam).
 /// </summary>
 public sealed class StartupInitializer(
-    JobRepository repository,
-    ElasticService elastic,
+    JobStore repository,
+    ElasticIndex elastic,
     ILogger<StartupInitializer> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -93,7 +95,7 @@ public sealed class StartupInitializer(
                 await repository.InitializeAsync(stoppingToken);
                 if (await elastic.EnsureIndexAsync(stoppingToken))
                 {
-                    logger.LogInformation("Startup concluído: schema PostgreSQL e índice {Index} prontos.", ElasticService.IndexName);
+                    logger.LogInformation("Startup concluído: schema PostgreSQL e índice {Index} prontos.", ElasticIndex.IndexName);
                     return;
                 }
                 logger.LogWarning("Tentativa {Attempt}: índice de busca indisponível; tentando novamente.", attempt);

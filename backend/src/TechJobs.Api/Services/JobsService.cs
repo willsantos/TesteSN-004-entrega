@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using TechJobs.Api.Domain;
-using TechJobs.Api.Infrastructure;
-using TechJobs.Api.Infrastructure.Elastic;
+using TechJobs.Api.Contracts;
+using TechJobs.Api.JobsCore;
+using TechJobs.Api.JobsCore.Persistence;
+using TechJobs.Api.Platform.Elastic;
+using TechJobs.Api.Platform.Runtime;
 
 namespace TechJobs.Api.Services;
 
@@ -12,18 +14,18 @@ namespace TechJobs.Api.Services;
 /// </summary>
 public sealed class JobsService
 {
-    private readonly JobRepository _repo;
+    private readonly JobStore _repo;
     private readonly CacheService _cache;
-    private readonly ElasticService _elastic;
+    private readonly ElasticIndex _elastic;
     private readonly SearchCacheGeneration _generation;
     private readonly CacheOptions _cacheOptions;
     private readonly IndexingQueue _indexingQueue;
     private readonly ILogger<JobsService> _logger;
 
     public JobsService(
-        JobRepository repo,
+        JobStore repo,
         CacheService cache,
-        ElasticService elastic,
+        ElasticIndex elastic,
         SearchCacheGeneration generation,
         CacheOptions cacheOptions,
         IndexingQueue indexingQueue,

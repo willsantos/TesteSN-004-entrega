@@ -1,4 +1,6 @@
-namespace TechJobs.Api.Domain;
+using TechJobs.Api.JobsCore;
+
+namespace TechJobs.Api.Contracts;
 
 /// <summary>Parâmetros de busca já validados (entrada da busca e da chave de cache canônica).</summary>
 public sealed record SearchQueryParams(

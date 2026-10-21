@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Primitives;
+using TechJobs.Api.Contracts;
+using TechJobs.Api.JobsCore;
 
 namespace TechJobs.Api.Domain;
 

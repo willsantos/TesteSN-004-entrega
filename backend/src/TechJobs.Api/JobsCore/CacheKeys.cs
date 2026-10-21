@@ -1,9 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using TechJobs.Api.Contracts;
 using TechJobs.Api.Domain;
 
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.JobsCore;
 
 /// <summary>
 /// Chaves de cache. A chave de busca deriva de uma forma canônica (sha256) da consulta

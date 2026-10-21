@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
-using TechJobs.Api.Domain;
-using TechJobs.Api.Infrastructure;
+using TechJobs.Api.JobsCore.Persistence;
+using TechJobs.Api.Platform.Elastic;
 
 namespace TechJobs.Api.Services;
 
@@ -29,15 +29,17 @@ public sealed class IndexingQueue
 /// </summary>
 public sealed class IndexingWorker : BackgroundService
 {
-    private readonly JobRepository _repo;
-    private readonly ElasticService _elastic;
+    private readonly JobStore _repo;
+    private readonly ElasticIndex _elastic;
+    private readonly Outbox _outbox;
     private readonly IndexingQueue _queue;
     private readonly ILogger<IndexingWorker> _logger;
 
-    public IndexingWorker(JobRepository repo, ElasticService elastic, IndexingQueue queue, ILogger<IndexingWorker> logger)
+    public IndexingWorker(JobStore repo, ElasticIndex elastic, Outbox outbox, IndexingQueue queue, ILogger<IndexingWorker> logger)
     {
         _repo = repo;
         _elastic = elastic;
+        _outbox = outbox;
         _queue = queue;
         _logger = logger;
     }
@@ -49,7 +51,7 @@ public sealed class IndexingWorker : BackgroundService
         {
             try
             {
-                var pending = await _repo.OutboxCountAsync(stoppingToken);
+                var pending = await _outbox.OutboxCountAsync(stoppingToken);
                 if (pending > 0)
                 {
                     await ProcessPendingAsync(stoppingToken);
@@ -81,14 +83,14 @@ public sealed class IndexingWorker : BackgroundService
     {
         while (true)
         {
-            var ids = await _repo.PeekOutboxAsync(500, ct);
+            var ids = await _outbox.PeekOutboxAsync(500, ct);
             if (ids.Count == 0) break;
 
             var jobs = await _repo.GetByIdsAsync(ids, ct);
             if (jobs.Count > 0)
                 await _elastic.IndexManyAsync(jobs, ct);
 
-            await _repo.RemoveFromOutboxAsync(ids, ct);
+            await _outbox.RemoveFromOutboxAsync(ids, ct);
         }
     }
 }

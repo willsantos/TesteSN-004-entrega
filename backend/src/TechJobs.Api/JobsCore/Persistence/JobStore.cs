@@ -1,17 +1,23 @@
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
-using TechJobs.Api.Domain;
+using TechJobs.Api.JobsCore;
+using TechJobs.Api.Platform;
 
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.JobsCore.Persistence;
 
 /// <summary>Acesso a dados puro Npgsql (sem ORM): SQL explícito e controle total das transações.</summary>
-public sealed class JobRepository
+public sealed class JobStore
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly Outbox _outbox;
     private static readonly JsonSerializerOptions TechJson = new(JsonSerializerDefaults.Web);
 
-    public JobRepository(NpgsqlDataSource dataSource) => _dataSource = dataSource;
+    public JobStore(NpgsqlDataSource dataSource, Outbox outbox)
+    {
+        _dataSource = dataSource;
+        _outbox = outbox;
+    }
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -59,7 +65,7 @@ public sealed class JobRepository
             BindJob(cmd, id, job, now, now);
             await cmd.ExecuteNonQueryAsync(ct);
         }
-        await EnqueueOutboxAsync(conn, tx, id, ct);
+        await _outbox.EnqueueAsync(conn, tx, id, ct);
         await tx.CommitAsync(ct);
         return ToJob(id, job, now, now);
     }
@@ -103,7 +109,7 @@ public sealed class JobRepository
             BindJob(cmd, id, job, current.PublishedAt, now);
             await cmd.ExecuteNonQueryAsync(ct);
         }
-        await EnqueueOutboxAsync(conn, tx, id, ct);
+        await _outbox.EnqueueAsync(conn, tx, id, ct);
         await tx.CommitAsync(ct);
         return ToJob(id, job, current.PublishedAt, now);
     }
@@ -142,47 +148,6 @@ public sealed class JobRepository
             await writer.CompleteAsync(ct);
         }
         await tx.CommitAsync(ct);
-    }
-
-    // ---- outbox ----
-
-    private static async Task EnqueueOutboxAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO outbox_events (job_id) VALUES (@id) ON CONFLICT (job_id) DO UPDATE SET queued_at = now()";
-        cmd.Parameters.AddWithValue("id", id);
-        cmd.Transaction = tx;
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    public async Task<IReadOnlyList<Guid>> PeekOutboxAsync(int limit, CancellationToken ct = default)
-    {
-        await using var cmd = _dataSource.CreateCommand("SELECT job_id FROM outbox_events ORDER BY queued_at LIMIT @limit");
-        cmd.Parameters.AddWithValue("limit", limit);
-        var ids = new List<Guid>(Math.Min(limit, 64));
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
-        return ids;
-    }
-
-    public async Task<long> OutboxCountAsync(CancellationToken ct = default)
-    {
-        await using var cmd = _dataSource.CreateCommand("SELECT count(*) FROM outbox_events");
-        return (long)(await cmd.ExecuteScalarAsync(ct))!;
-    }
-
-    public async Task RemoveFromOutboxAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default)
-    {
-        if (ids.Count == 0) return;
-        await using var cmd = _dataSource.CreateCommand("DELETE FROM outbox_events WHERE job_id = ANY(@ids)");
-        cmd.Parameters.AddWithValue("ids", ids);
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    public async Task ClearOutboxAsync(CancellationToken ct = default)
-    {
-        await using var cmd = _dataSource.CreateCommand("DELETE FROM outbox_events");
-        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     // ---- helpers ----

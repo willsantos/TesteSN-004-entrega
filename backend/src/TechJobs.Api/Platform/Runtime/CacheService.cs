@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Platform.Runtime;
 
 public enum CacheOutcome { Hit, Miss, Error }
 

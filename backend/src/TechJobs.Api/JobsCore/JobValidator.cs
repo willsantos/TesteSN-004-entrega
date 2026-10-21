@@ -1,4 +1,4 @@
-namespace TechJobs.Api.Domain;
+namespace TechJobs.Api.JobsCore;
 
 /// <summary>
 /// Validação e normalização do payload de vagas (regras da seção 4 do README).

@@ -1,4 +1,4 @@
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Platform.Runtime;
 
 /// <summary>
 /// Estado de falhas simuladas (dev-only, ativado via POST /admin/faults).

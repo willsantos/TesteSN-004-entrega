@@ -1,4 +1,4 @@
-namespace TechJobs.Api.Domain;
+namespace TechJobs.Api.Contracts;
 
 /// <summary>Payload/filtro inválido → 400 Problem Details.</summary>
 public sealed class ValidationException(string detail) : Exception(detail)

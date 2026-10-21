@@ -1,6 +1,6 @@
 using System.Text.Json;
-using TechJobs.Api.Domain;
-using TechJobs.Api.Infrastructure;
+using TechJobs.Api.Contracts;
+using TechJobs.Api.Platform.Runtime;
 using TechJobs.Api.Services;
 
 namespace TechJobs.Api.Endpoints;

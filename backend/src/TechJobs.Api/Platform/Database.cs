@@ -1,6 +1,6 @@
 using Npgsql;
 
-namespace TechJobs.Api.Infrastructure;
+namespace TechJobs.Api.Platform;
 
 /// <summary>
 /// Fonte da verdade transacional. O schema nasce automaticamente no startup
