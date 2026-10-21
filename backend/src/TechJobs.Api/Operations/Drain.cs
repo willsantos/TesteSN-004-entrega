@@ -1,6 +1,5 @@
 using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
-using TechJobs.Api.Services;
 
 namespace TechJobs.Api.Operations;
 

@@ -2,7 +2,7 @@ using System.Text.Json;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore;
 using TechJobs.Api.JobsCore.Persistence;
-using TechJobs.Api.Services;
+using TechJobs.Api.Platform.Elastic;
 
 namespace TechJobs.Api.Slices.CreateJob;
 

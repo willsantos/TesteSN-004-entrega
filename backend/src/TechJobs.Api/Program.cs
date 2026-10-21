@@ -1,6 +1,4 @@
 using Elastic.Clients.Elasticsearch;
-using Elastic.Transport;
-using Npgsql;
 using StackExchange.Redis;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore.Persistence;
@@ -8,7 +6,6 @@ using TechJobs.Api.Platform;
 using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
 using TechJobs.Api.Operations;
-using TechJobs.Api.Services;
 using TechJobs.Api.Slices.CreateJob;
 using TechJobs.Api.Slices.GetJobById;
 using TechJobs.Api.Slices.JobStats;
@@ -28,20 +25,21 @@ var cacheOptions = new CacheOptions(
 var enableTestEndpoints = string.Equals(
     builder.Configuration["ENABLE_TEST_ENDPOINTS"], "true", StringComparison.OrdinalIgnoreCase);
 
-// ---- serviços ----
+// ---- kernel/persistência (plumbing da API + PostgreSQL: fonte da verdade e outbox) ----
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddOpenApi();
+builder.Services.AddSingleton(_ => Database.CreateDataSource(postgresConnectionString));
+builder.Services.AddSingleton<Outbox>();
+builder.Services.AddSingleton<JobStore>();
 
+// ---- cache/runtime (Redis com degradação graciosa + estado de falhas e contadores) ----
 builder.Services.AddSingleton(cacheOptions);
 builder.Services.AddSingleton<FaultState>();
 builder.Services.AddSingleton<CacheCounters>();
 builder.Services.AddSingleton<SearchCacheGeneration>();
-builder.Services.AddSingleton(_ => Database.CreateDataSource(postgresConnectionString));
-builder.Services.AddSingleton<Outbox>();
-builder.Services.AddSingleton<JobStore>();
 builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(sp =>
 {
     var options = ConfigurationOptions.Parse(redisConnectionString);
@@ -49,14 +47,20 @@ builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(sp =>
     return ConnectionMultiplexer.Connect(options);
 });
 builder.Services.AddSingleton<CacheService>();
+
+// ---- elastic/platform (projeção de busca + indexação por outbox) ----
 builder.Services.AddSingleton(_ => new ElasticsearchClient(
     new ElasticsearchClientSettings(new Uri(elasticsearchUrl))
         .RequestTimeout(TimeSpan.FromSeconds(30))));
 builder.Services.AddSingleton<ElasticIndex>();
-builder.Services.AddSingleton<SearchQueryRunner>();
-builder.Services.AddSingleton<JobStatsRunner>();
 builder.Services.AddSingleton<IndexingQueue>();
 builder.Services.AddSingleton<IndexingWorker>();
+
+// ---- slices (runners de consulta usados pelos endpoints de busca e stats) ----
+builder.Services.AddSingleton<SearchQueryRunner>();
+builder.Services.AddSingleton<JobStatsRunner>();
+
+// ---- hosted services (inicialização de infraestrutura + worker de indexação) ----
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IndexingWorker>());
 builder.Services.AddHostedService<StartupInitializer>();
 
@@ -93,39 +97,6 @@ app.Run();
 
 /// <summary>Expõe Program para WebApplicationFactory nos testes.</summary>
 public partial class Program;
-
-/// <summary>
-/// Garante schema do PostgreSQL e índice do Elasticsearch no startup, com retry
-/// (dependências sobem saudáveis pelo docker-compose, mas desempates não custam).
-/// </summary>
-public sealed class StartupInitializer(
-    JobStore repository,
-    ElasticIndex elastic,
-    ILogger<StartupInitializer> logger) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        for (var attempt = 1; attempt <= 10 && !stoppingToken.IsCancellationRequested; attempt++)
-        {
-            try
-            {
-                await repository.InitializeAsync(stoppingToken);
-                if (await elastic.EnsureIndexAsync(stoppingToken))
-                {
-                    logger.LogInformation("Startup concluído: schema PostgreSQL e índice {Index} prontos.", ElasticIndex.IndexName);
-                    return;
-                }
-                logger.LogWarning("Tentativa {Attempt}: índice de busca indisponível; tentando novamente.", attempt);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Tentativa {Attempt} de inicialização falhou; tentando novamente.", attempt);
-            }
-            await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
-        }
-        logger.LogError("Inicialização de infraestrutura não concluída; endpoints de leitura podem responder 503 até o retry interno.");
-    }
-}
 
 internal static class SwaggerPage
 {

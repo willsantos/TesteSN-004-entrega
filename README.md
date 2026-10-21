@@ -58,7 +58,7 @@ não estiver no ar.
 ## Arquitetura e decisões
 
 ```
-POST/PUT ──► JobsService ──► PostgreSQL (commit + outbox na MESMA transação)
+POST/PUT ──► slices CreateJob/UpdateJob ──► PostgreSQL (commit + outbox na MESMA transação)
                  │                         │
                  │ invalida cache detalhe   │ worker em background (canal + tick 1s)
                  ▼                         ▼
@@ -191,12 +191,19 @@ estruturados sem strings de conexão.
 
 ```
 backend/
-  src/TechJobs.Api/            # Program.cs, Domain/, Infrastructure/ (PG, Redis, ES, seed), Services/, Endpoints/
+  src/TechJobs.Api/
+    Contracts/               # contrato de API congelado: DTOs, exceções de contrato, handler global
+    JobsCore/                # agregado Job (modelos, validação, JobDoc) + Persistence/ (JobStore, outbox)
+    Slices/                  # 1 rota pública = 1 slice (endpoint + handler do fluxo):
+                             #   CreateJob/, UpdateJob/, GetJobById/, SearchJobs/, JobStats/
+    Operations/              # endpoints dev-only (/admin/*): reset, seed, faults, cache-stats, drain, reindex
+    Platform/                # transversal: Database (PG), Elastic/ (índice de busca + worker de
+                             #   indexação), Runtime/ (cache Redis, falhas, contadores), StartupInitializer
   tests/TechJobs.UnitTests/    # validação, chave canônica, parser de busca, seed determinístico
   tests/TechJobs.IntegrationTests/  # black-box contra a stack (contrato, cache, falhas)
 frontend/src/                  # pages/, components/, services (api.ts), types.ts
 pipelines/templates/           # template YAML reutilizável do Azure DevOps
-docs/                          # pipeline-evidence.md, DESAFIO-SPEC.md (spec original)
+docs/                          # adr/0001-vertical-slices.md, pipeline-evidence.md, DESAFIO-SPEC.md
 ```
 
 ## Trade-offs e limitações conhecidas

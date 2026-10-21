@@ -2,8 +2,8 @@ using System.Text.Json;
 using TechJobs.Api.Contracts;
 using TechJobs.Api.JobsCore;
 using TechJobs.Api.JobsCore.Persistence;
+using TechJobs.Api.Platform.Elastic;
 using TechJobs.Api.Platform.Runtime;
-using TechJobs.Api.Services;
 
 namespace TechJobs.Api.Slices.UpdateJob;
 

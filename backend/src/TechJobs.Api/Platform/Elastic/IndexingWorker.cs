@@ -1,9 +1,8 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TechJobs.Api.JobsCore.Persistence;
-using TechJobs.Api.Platform.Elastic;
 
-namespace TechJobs.Api.Services;
+namespace TechJobs.Api.Platform.Elastic;
 
 /// <summary>
 /// Sinalização de indexação pendente: o POST/PUT acorda o worker via canal; o tick
