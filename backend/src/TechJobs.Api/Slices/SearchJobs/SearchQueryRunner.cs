@@ -36,7 +36,19 @@ public sealed class SearchQueryRunner
     {
         EnsureAvailable();
 
-        var response = await _client.SearchAsync<JobDoc>(s => BuildSearch(s, p), ct);
+        // Offset em long: page=int.MaxValue não estoura a aritmética; dentro da janela o cast é seguro.
+        var from = (long)(p.Page - 1) * p.PageSize;
+        if (from + p.PageSize > ElasticIndex.MaxResultWindow)
+        {
+            // Página além da janela do ES: mesma consulta com from=0/size=0 — o contrato exige
+            // 200 com items vazio e o total real consultado no ES (nunca 500/503 por página).
+            var totalOnly = await _client.SearchAsync<JobDoc>(s => BuildSearch(s, p, 0).Size(0), ct);
+            if (!totalOnly.IsValidResponse)
+                throw new SearchUnavailableException("A busca está temporariamente indisponível (Elasticsearch).");
+            return new SearchResult(totalOnly.Total, []);
+        }
+
+        var response = await _client.SearchAsync<JobDoc>(s => BuildSearch(s, p, (int)from), ct);
         if (!response.IsValidResponse)
             throw new SearchUnavailableException("A busca está temporariamente indisponível (Elasticsearch).");
 
@@ -47,7 +59,7 @@ public sealed class SearchQueryRunner
         return new SearchResult(response.Total, items);
     }
 
-    private static SearchRequestDescriptor<JobDoc> BuildSearch(SearchRequestDescriptor<JobDoc> s, SearchQueryParams p)
+    private static SearchRequestDescriptor<JobDoc> BuildSearch(SearchRequestDescriptor<JobDoc> s, SearchQueryParams p, int from)
     {
         var filters = new List<Action<QueryDescriptor<JobDoc>>>
         {
@@ -67,19 +79,18 @@ public sealed class SearchQueryRunner
             filters.Add(f => f.Range(r => r.NumberRange(n => n.Field("salaryMin").Lte((double)p.MaxSalary.Value))));
 
         s.Index(ElasticIndex.IndexName)
-         .From((p.Page - 1) * p.PageSize)
+         .From(from)
          .Size(p.PageSize)
          .TrackTotalHits(new TrackHits(true))
          .Query(q => q.Bool(b =>
          {
              if (p.HasQueryText)
              {
-                 // Título pesa mais que descrição (boost 3x); múltiplos termos: semântica E
-                 // distribuída entre título e descrição (cross_fields combina os dois campos
-                 // com o analyzer `portuguese`) num único grupo: com Operator.And cada termo precisa
-                 // aparecer em pelo menos um dos campos — semântica E distribuída entre título
-                 // e descrição, e não mais restrita a um campo só (best_fields).
-                 b.Must(m => m.MultiMatch(mm => mm
+                // Título pesa mais que descrição (boost 3x). cross_fields une os campos (mesmo
+                // analyzer `portuguese`) num único grupo: com Operator.And cada termo precisa
+                // aparecer em pelo menos um dos campos — semântica E distribuída entre título
+                // e descrição, e não mais restrita a um campo só (best_fields).
+                b.Must(m => m.MultiMatch(mm => mm
                      .Fields(new[] { "title^3", "description" })
                      .Query(p.Q)
                      .Type(TextQueryType.CrossFields)

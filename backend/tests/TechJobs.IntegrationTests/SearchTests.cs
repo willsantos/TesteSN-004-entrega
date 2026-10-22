@@ -201,6 +201,67 @@ public class SearchTests : IAsyncLifetime
     }
 
     [LiveApiFact]
+    public async Task Busca_E_distribuida_entre_titulo_e_descricao()
+    {
+        // A: "kubernetes" só no título; "observabilidade" só na descrição
+        var a = await CreateJobAsync(Job(
+            "Engenheiro Kubernetes Sênior", "Cloud Dist",
+            "Plataforma de contêineres com foco em observabilidade de serviços distribuídos em produção.",
+            ["Docker"], "senior", "remoto"));
+        // B: "kubernetes" no título, sem "observabilidade" em lugar nenhum
+        await CreateJobAsync(Job(
+            "Administrador Kubernetes Pleno", "Cloud Dist",
+            "Operação de clusters gerenciados e automação de deploys de contêineres em escala.",
+            ["Docker"], "pleno", "remoto"));
+        // C: "observabilidade" na descrição, sem "kubernetes" em lugar nenhum
+        await CreateJobAsync(Job(
+            "Analista de Plataforma Sênior", "Cloud Dist",
+            "Manutenção de ferramentas de observabilidade para times de produto em crescimento.",
+            ["Grafana"], "senior", "remoto"));
+        await DrainAsync();
+
+        using var http = ApiClient.Create();
+        // E distribuída: um termo no título e outro na descrição → casa somente a vaga A
+        var both = await Search(http, "?q=kubernetes observabilidade");
+        Assert.Equal(1, both.GetProperty("total").GetInt64());
+        Assert.Equal(a, both.GetProperty("items")[0].GetProperty("id").GetString());
+
+        // Termo isolado: A e B (título) aparecem, C fica de fora
+        var kube = await Search(http, "?q=kubernetes");
+        Assert.Equal(2, kube.GetProperty("total").GetInt64());
+        var ids = kube.GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("id").GetString()).ToList();
+        Assert.Contains(a, ids);
+    }
+
+    [LiveApiFact]
+    public async Task Busca_stemming_e_acentucao_tem_regressao_coberta()
+    {
+        // Descrição com "programação" (stemming de -ção) e "código" (folding de acento)
+        var d = await CreateJobAsync(Job(
+            "Desenvolvedor Backend Pleno", "Code Sa",
+            "Manutenção de APIs com código limpo, testes automatizados e rotinas de programação em C#.",
+            ["C#"], "pleno", "hibrido"));
+        await DrainAsync();
+
+        using var http = ApiClient.Create();
+        // Stemming PT (e maiúsculas): flexão de gênero "DESENVOLVEDORA" casa com "Desenvolvedor"
+        var stemming = await Search(http, "?q=DESENVOLVEDORA");
+        Assert.Equal(1, stemming.GetProperty("total").GetInt64());
+        Assert.Equal(d, stemming.GetProperty("items")[0].GetProperty("id").GetString());
+
+        // Folding de acento: "codigo" (sem acento) casa com "código" da descrição
+        var folding = await Search(http, "?q=codigo");
+        Assert.Equal(1, folding.GetProperty("total").GetInt64());
+        Assert.Equal(d, folding.GetProperty("items")[0].GetProperty("id").GetString());
+
+        // "programação" (com acento, URL-encodada) casa com a descrição
+        var acento = await Search(http, $"?q={Uri.EscapeDataString("programação")}");
+        Assert.Equal(1, acento.GetProperty("total").GetInt64());
+        Assert.Equal(d, acento.GetProperty("items")[0].GetProperty("id").GetString());
+    }
+
+    [LiveApiFact]
     public async Task Paginacao_total_e_pagina_fora_do_fim()
     {
         for (var i = 0; i < 12; i++)
@@ -300,63 +361,43 @@ public class SearchTests : IAsyncLifetime
     }
 
     [LiveApiFact]
-    public async Task Busca_E_distribuida_entre_titulo_e_descricao()
+    public async Task Paginacao_alem_da_janela_padrao()
     {
-        // A: "kubernetes" só no título; "observabilidade" só na descrição
-        var a = await CreateJobAsync(Job(
-            "Engenheiro Kubernetes Sênior", "Cloud Dist",
-            "Plataforma de contêineres com foco em observabilidade de serviços distribuídos em produção.",
-            ["Docker"], "senior", "remoto"));
-        // B: "kubernetes" no título, sem "observabilidade" em lugar nenhum
-        await CreateJobAsync(Job(
-            "Administrador Kubernetes Pleno", "Cloud Dist",
-            "Operação de clusters gerenciados e automação de deploys de contêineres em escala.",
-            ["Docker"], "pleno", "remoto"));
-        // C: "observabilidade" na descrição, sem "kubernetes" em lugar nenhum
-        await CreateJobAsync(Job(
-            "Analista de Plataforma Sênior", "Cloud Dist",
-            "Manutenção de ferramentas de observabilidade para times de produto em crescimento.",
-            ["Grafana"], "senior", "remoto"));
+        using var seed = await ApiClient.Create().PostAsync("/admin/seed",
+            ApiClient.JsonBody(new { count = 20000, seed = 11 }));
+        Assert.True(seed.IsSuccessStatusCode);
         await DrainAsync();
 
         using var http = ApiClient.Create();
-        // E distribuída: um termo no título e outro na descrição → casa somente a vaga A
-        var both = await Search(http, "?q=kubernetes observabilidade");
-        Assert.Equal(1, both.GetProperty("total").GetInt64());
-        Assert.Equal(a, both.GetProperty("items")[0].GetProperty("id").GetString());
 
-        // Termo isolado: A e B (título) aparecem, C fica de fora
-        var kube = await Search(http, "?q=kubernetes");
-        Assert.Equal(2, kube.GetProperty("total").GetInt64());
-        var ids = kube.GetProperty("items").EnumerateArray()
-            .Select(i => i.GetProperty("id").GetString()).ToList();
-        Assert.Contains(a, ids);
-    }
+        // from=10000: exatamente na borda da janela padrão do ES (10k) — precisa da janela
+        // configurada (50k) para não virar 503.
+        var atWindow = await Search(http, "?pageSize=10&page=1001");
+        var total = atWindow.GetProperty("total").GetInt64();
+        Assert.True(total > 0, $"seed de 20000 com ~12% encerradas deveria deixar abertas, veio total={total}");
+        Assert.NotEmpty(atWindow.GetProperty("items").EnumerateArray());
 
-    [LiveApiFact]
-    public async Task Busca_stemming_e_acentucao_tem_regressao_coberta()
-    {
-        // Descrição com "programação" (stemming de -ção) e "código" (folding de acento)
-        var d = await CreateJobAsync(Job(
-            "Desenvolvedor Backend Pleno", "Code Sa",
-            "Manutenção de APIs com código limpo, testes automatizados e rotinas de programação em C#.",
-            ["C#"], "pleno", "hibrido"));
-        await DrainAsync();
+        // from=19950 (from+size=20000): paginação profunda dentro da janela de 50k.
+        // ~12% do seed é encerrado (T ≈ 17600): só há items se a página começa antes do fim.
+        var deep = await Search(http, "?page=400&pageSize=50");
+        Assert.Equal(total, deep.GetProperty("total").GetInt64());
+        if (total > 19950)
+            Assert.NotEmpty(deep.GetProperty("items").EnumerateArray());
 
-        using var http = ApiClient.Create();
-        // Stemming PT (e maiúsculas): flexão de gênero "DESENVOLVEDORA" casa com "Desenvolvedor"
-        var stemming = await Search(http, "?q=DESENVOLVEDORA");
-        Assert.Equal(1, stemming.GetProperty("total").GetInt64());
-        Assert.Equal(d, stemming.GetProperty("items")[0].GetProperty("id").GetString());
+        // Muito além do fim, ainda dentro da janela: 200 com items vazio e total real.
+        var beyondEnd = await Search(http, $"?page={total / 50 + 100}&pageSize=50");
+        Assert.Equal(total, beyondEnd.GetProperty("total").GetInt64());
+        Assert.Empty(beyondEnd.GetProperty("items").EnumerateArray());
 
-        // Folding de acento: "codigo" (sem acento) casa com "código" da descrição
-        var folding = await Search(http, "?q=codigo");
-        Assert.Equal(1, folding.GetProperty("total").GetInt64());
-        Assert.Equal(d, folding.GetProperty("items")[0].GetProperty("id").GetString());
+        // Extremo (page=int.MaxValue): aritmética de offset em long, nunca 500/503.
+        var extreme = await Search(http, "?page=2147483647&pageSize=50");
+        Assert.Equal(total, extreme.GetProperty("total").GetInt64());
+        Assert.Empty(extreme.GetProperty("items").EnumerateArray());
 
-        // "programação" (com acento, URL-encodada) casa com a descrição
-        var acento = await Search(http, $"?q={Uri.EscapeDataString("programação")}");
-        Assert.Equal(1, acento.GetProperty("total").GetInt64());
-        Assert.Equal(d, acento.GetProperty("items")[0].GetProperty("id").GetString());
+        // from=12450 (from+size=12500), bem antes do fim esperado (~17600 abertas).
+        var mid = await Search(http, "?page=250&pageSize=50");
+        Assert.Equal(total, mid.GetProperty("total").GetInt64());
+        if (total > 12450)
+            Assert.NotEmpty(mid.GetProperty("items").EnumerateArray());
     }
 }

@@ -1,5 +1,6 @@
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
+using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.QueryDsl;
 using Microsoft.Extensions.Logging;
 using TechJobs.Api.Contracts;
@@ -16,6 +17,13 @@ namespace TechJobs.Api.Platform.Elastic;
 public sealed class ElasticIndex
 {
     public const string IndexName = "techjobs-v1";
+
+    /// <summary>
+    /// Janela de from+size além do padrão (10.000): cobre o seed de 20 mil vagas do
+    /// desafio em qualquer página válida (pageSize até 50). Ver SearchQueryRunner.
+    /// </summary>
+    public const int MaxResultWindow = 50_000;
+
     private const int BulkChunkSize = 2000;
 
     private readonly ElasticsearchClient _client;
@@ -39,12 +47,23 @@ public sealed class ElasticIndex
     public async Task<bool> EnsureIndexAsync(CancellationToken ct = default)
     {
         var exists = await _client.Indices.ExistsAsync(IndexName, ct);
-        if (exists.Exists) return true;
+        if (exists.Exists)
+        {
+            // max_result_window é setting dinâmico: índices criados antes desta versão ganham a
+            // janela estendida na primeira subida bem-sucedida. Falha não derruba o startup.
+            var settings = await _client.Indices.PutSettingsAsync(
+                new IndexSettings { MaxResultWindow = MaxResultWindow }, IndexName, ct);
+            if (!settings.IsValidResponse)
+                _logger.LogWarning("Aplicação de max_result_window no índice {Index} falhou: {Error}",
+                    IndexName, settings.DebugInformation);
+            return true;
+        }
 
         var response = await _client.Indices.CreateAsync<JobDoc>(IndexName, c => c
             .Settings(s => s
                 .NumberOfShards(1)
-                .NumberOfReplicas(0))
+                .NumberOfReplicas(0)
+                .MaxResultWindow(MaxResultWindow))
             .Mappings(m => m
                 .Properties(p => p
                     .Keyword("id")
