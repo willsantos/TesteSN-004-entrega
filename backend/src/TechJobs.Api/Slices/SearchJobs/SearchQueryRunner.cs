@@ -74,10 +74,15 @@ public sealed class SearchQueryRunner
          {
              if (p.HasQueryText)
              {
-                 // Título pesa mais que descrição (boost 3x); múltiplos termos: semântica E.
+                 // Título pesa mais que descrição (boost 3x); múltiplos termos: semântica E
+                 // distribuída entre título e descrição (cross_fields combina os dois campos
+                 // com o analyzer `portuguese`) num único grupo: com Operator.And cada termo precisa
+                 // aparecer em pelo menos um dos campos — semântica E distribuída entre título
+                 // e descrição, e não mais restrita a um campo só (best_fields).
                  b.Must(m => m.MultiMatch(mm => mm
                      .Fields(new[] { "title^3", "description" })
                      .Query(p.Q)
+                     .Type(TextQueryType.CrossFields)
                      .Operator(Operator.And)));
              }
              else

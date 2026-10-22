@@ -298,4 +298,65 @@ public class SearchTests : IAsyncLifetime
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
     }
+
+    [LiveApiFact]
+    public async Task Busca_E_distribuida_entre_titulo_e_descricao()
+    {
+        // A: "kubernetes" só no título; "observabilidade" só na descrição
+        var a = await CreateJobAsync(Job(
+            "Engenheiro Kubernetes Sênior", "Cloud Dist",
+            "Plataforma de contêineres com foco em observabilidade de serviços distribuídos em produção.",
+            ["Docker"], "senior", "remoto"));
+        // B: "kubernetes" no título, sem "observabilidade" em lugar nenhum
+        await CreateJobAsync(Job(
+            "Administrador Kubernetes Pleno", "Cloud Dist",
+            "Operação de clusters gerenciados e automação de deploys de contêineres em escala.",
+            ["Docker"], "pleno", "remoto"));
+        // C: "observabilidade" na descrição, sem "kubernetes" em lugar nenhum
+        await CreateJobAsync(Job(
+            "Analista de Plataforma Sênior", "Cloud Dist",
+            "Manutenção de ferramentas de observabilidade para times de produto em crescimento.",
+            ["Grafana"], "senior", "remoto"));
+        await DrainAsync();
+
+        using var http = ApiClient.Create();
+        // E distribuída: um termo no título e outro na descrição → casa somente a vaga A
+        var both = await Search(http, "?q=kubernetes observabilidade");
+        Assert.Equal(1, both.GetProperty("total").GetInt64());
+        Assert.Equal(a, both.GetProperty("items")[0].GetProperty("id").GetString());
+
+        // Termo isolado: A e B (título) aparecem, C fica de fora
+        var kube = await Search(http, "?q=kubernetes");
+        Assert.Equal(2, kube.GetProperty("total").GetInt64());
+        var ids = kube.GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("id").GetString()).ToList();
+        Assert.Contains(a, ids);
+    }
+
+    [LiveApiFact]
+    public async Task Busca_stemming_e_acentucao_tem_regressao_coberta()
+    {
+        // Descrição com "programação" (stemming de -ção) e "código" (folding de acento)
+        var d = await CreateJobAsync(Job(
+            "Desenvolvedor Backend Pleno", "Code Sa",
+            "Manutenção de APIs com código limpo, testes automatizados e rotinas de programação em C#.",
+            ["C#"], "pleno", "hibrido"));
+        await DrainAsync();
+
+        using var http = ApiClient.Create();
+        // Stemming PT (e maiúsculas): flexão de gênero "DESENVOLVEDORA" casa com "Desenvolvedor"
+        var stemming = await Search(http, "?q=DESENVOLVEDORA");
+        Assert.Equal(1, stemming.GetProperty("total").GetInt64());
+        Assert.Equal(d, stemming.GetProperty("items")[0].GetProperty("id").GetString());
+
+        // Folding de acento: "codigo" (sem acento) casa com "código" da descrição
+        var folding = await Search(http, "?q=codigo");
+        Assert.Equal(1, folding.GetProperty("total").GetInt64());
+        Assert.Equal(d, folding.GetProperty("items")[0].GetProperty("id").GetString());
+
+        // "programação" (com acento, URL-encodada) casa com a descrição
+        var acento = await Search(http, $"?q={Uri.EscapeDataString("programação")}");
+        Assert.Equal(1, acento.GetProperty("total").GetInt64());
+        Assert.Equal(d, acento.GetProperty("items")[0].GetProperty("id").GetString());
+    }
 }
