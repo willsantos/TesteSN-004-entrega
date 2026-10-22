@@ -25,6 +25,8 @@ public sealed class IndexingQueue
 /// 2. worker indexa em lote e só remove o evento após confirmação do bulk;
 /// 3. falha (ES fora do ar) deixa o evento pendente — próximo tick repete com backoff natural.
 /// Se a API cair entre commit e indexação, o evento sobrevive no outbox e é recuperado no restart.
+/// 4. worker e drain (mesma instância singleton) são serializados por _gate: nunca indexam em
+/// paralelo, e cada lote remove exatamente os eventos que consumiu (eventos novos sobrevivem).
 /// </summary>
 public sealed class IndexingWorker : BackgroundService
 {
@@ -33,6 +35,7 @@ public sealed class IndexingWorker : BackgroundService
     private readonly Outbox _outbox;
     private readonly IndexingQueue _queue;
     private readonly ILogger<IndexingWorker> _logger;
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     public IndexingWorker(JobStore repo, ElasticIndex elastic, Outbox outbox, IndexingQueue queue, ILogger<IndexingWorker> logger)
     {
@@ -77,19 +80,50 @@ public sealed class IndexingWorker : BackgroundService
         }
     }
 
-    /// <summary>Processa todo o outbox em lotes; usado pelo worker (erros engolidos) e pelo drain.</summary>
+    /// <summary>
+    /// Processa todo o outbox em lotes; usado pelo worker (erros engolidos) e pelo drain.
+    /// Todo o loop roda sob _gate: worker e drain não rodando em paralelo. Cada lote remove
+    /// EXATAMENTE os eventos que fez peek — eventos enfileirados durante a indexação sobrevivem
+    /// para o próximo lote (sem perda de atualização).
+    /// </summary>
     public async Task ProcessPendingAsync(CancellationToken ct = default)
     {
-        while (true)
+        await _gate.WaitAsync(ct);
+        try
         {
-            var ids = await _outbox.PeekOutboxAsync(500, ct);
-            if (ids.Count == 0) break;
+            while (true)
+            {
+                var eventos = await _outbox.PeekOutboxAsync(500, ct);
+                if (eventos.Count == 0) break;
 
-            var jobs = await _repo.GetByIdsAsync(ids, ct);
-            if (jobs.Count > 0)
-                await _elastic.IndexManyAsync(jobs, ct);
+                var jobIds = eventos.Select(e => e.JobId).Distinct().ToList();
+                var jobs = await _repo.GetByIdsAsync(jobIds, ct);
+                if (jobs.Count > 0)
+                    await _elastic.IndexManyAsync(jobs, ct);
 
-            await _outbox.RemoveFromOutboxAsync(ids, ct);
+                await _outbox.RemoveFromOutboxAsync(eventos.Select(e => e.EventId).ToList(), ct);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Executa a operação sob o MESMO gate do ProcessPendingAsync: manutenção pesada
+    /// (reindex) nunca corre em paralelo com o worker nem com o drain na mesma instância.
+    /// </summary>
+    public async Task RunExclusivelyAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await operation(ct);
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 }

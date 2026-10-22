@@ -43,11 +43,33 @@ public sealed class JobStore
         return await ReadAllAsync(cmd, ct);
     }
 
-    public async Task<IReadOnlyList<Job>> GetAllAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Snapshot RepeatableRead de TODAS as vagas + watermark do outbox NA MESMA transação
+    /// (o PostgreSQL congela a visibilidade no primeiro comando): o watermark é consistente
+    /// com o snapshot — qualquer evento commitado depois tem event_id maior e sobrevive à
+    /// limpeza do reindex. Usado pelo reindex coordenado.
+    /// </summary>
+    public async Task<(IReadOnlyList<Job> Jobs, long Watermark)> SnapshotAllWithWatermarkAsync(CancellationToken ct = default)
     {
-        await using var cmd = _dataSource.CreateCommand(
-            "SELECT id, title, company, description, technologies, seniority, work_mode, city, salary_min, salary_max, status, published_at, updated_at FROM jobs ORDER BY id");
-        return await ReadAllAsync(cmd, ct);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct);
+        IReadOnlyList<Job> jobs;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText =
+                "SELECT id, title, company, description, technologies, seniority, work_mode, city, salary_min, salary_max, status, published_at, updated_at FROM jobs ORDER BY id";
+            jobs = await ReadAllAsync(cmd, ct);
+        }
+        long watermark;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT coalesce(max(event_id), 0) FROM outbox_events";
+            watermark = (long)(await cmd.ExecuteScalarAsync(ct))!;
+        }
+        await tx.CommitAsync(ct);
+        return (jobs, watermark);
     }
 
     /// <summary>INSERT da vaga + evento de outbox na mesma transação (indexação eventual).</summary>
