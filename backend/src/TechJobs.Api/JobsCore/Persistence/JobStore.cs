@@ -72,7 +72,12 @@ public sealed class JobStore
         return (jobs, watermark);
     }
 
-    /// <summary>INSERT da vaga + evento de outbox na mesma transação (indexação eventual).</summary>
+    /// <summary>
+    /// INSERT da vaga + evento de outbox na mesma transação. Após o INSERT, a linha é
+    /// re-lida NA MESMA transação: o numeric(14,2) do PostgreSQL é a autoridade de escala
+    /// salarial — a resposta devolve o valor persistido que o GET também devolverá
+    /// (sem divergência de arredondamento entre POST e GET).
+    /// </summary>
     public async Task<Job> CreateAsync(Guid id, ValidatedJob job, DateTime now, CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -88,8 +93,9 @@ public sealed class JobStore
             await cmd.ExecuteNonQueryAsync(ct);
         }
         await _outbox.EnqueueAsync(conn, tx, id, ct);
+        var persisted = await ReadJobAsync(conn, tx, id, ct);
         await tx.CommitAsync(ct);
-        return ToJob(id, job, now, now);
+        return persisted; // timestamps semânticos preservados: published_at/updated_at = now
     }
 
     /// <summary>
@@ -115,7 +121,7 @@ public sealed class JobStore
         if (current.SameContentAs(job))
         {
             await tx.CommitAsync(ct);
-            return current; // nada mudou: estado e updatedAt preservados
+            return current; // nada mudou: estado PERSISTIDO (SELECT FOR UPDATE) e updatedAt preservados
         }
 
         var now = DateTime.UtcNow;
@@ -132,8 +138,9 @@ public sealed class JobStore
             await cmd.ExecuteNonQueryAsync(ct);
         }
         await _outbox.EnqueueAsync(conn, tx, id, ct);
+        var persisted = await ReadJobAsync(conn, tx, id, ct);
         await tx.CommitAsync(ct);
-        return ToJob(id, job, current.PublishedAt, now);
+        return persisted; // timestamps semânticos preservados: published_at do registro, updated_at = now
     }
 
     public async Task TruncateAsync(CancellationToken ct = default)
@@ -197,9 +204,23 @@ public sealed class JobStore
         DateTime.SpecifyKind(r.GetDateTime(11), DateTimeKind.Utc),
         DateTime.SpecifyKind(r.GetDateTime(12), DateTimeKind.Utc));
 
-    private static Job ToJob(Guid id, ValidatedJob v, DateTime publishedAt, DateTime updatedAt) => new(
-        id, v.Title, v.Company, v.Description, v.Technologies, v.Seniority, v.WorkMode,
-        v.City, v.SalaryMin, v.SalaryMax, v.Status, publishedAt, updatedAt);
+    /// <summary>
+    /// Re-leitura da linha da vaga dentro da transação corrente (SELECT com as mesmas
+    /// colunas do GET por id): devolve o estado persistido — salários já na escala do
+    /// numeric(14,2) — como resposta oficial da escrita. Substitui o antigo ToJob
+    /// (objeto recebido), que divergia do valor persistido em centavos.
+    /// </summary>
+    private static async Task<Job> ReadJobAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT id, title, company, description, technologies, seniority, work_mode, city, salary_min, salary_max, status, published_at, updated_at FROM jobs WHERE id = @id";
+        cmd.Parameters.AddWithValue("id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var read = await reader.ReadAsync(ct);
+        if (!read) throw new InvalidOperationException($"Vaga {id} escrita na transação não encontrada na re-leitura.");
+        return MapJob(reader);
+    }
 
     private static void BindJob(NpgsqlCommand cmd, Guid id, ValidatedJob v, DateTime publishedAt, DateTime updatedAt)
     {

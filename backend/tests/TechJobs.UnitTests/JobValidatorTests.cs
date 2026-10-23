@@ -197,6 +197,78 @@ public class JobValidatorTests
         Assert.Null(v.City);
     }
 
+
+    [Fact]
+    public void Salario_normalizado_para_duas_casas()
+    {
+        // Round half away from zero (igual ao numeric(14,2) do PostgreSQL): .005 arredonda para cima.
+        var up = ValidateOk(new JobRequest
+        {
+            Title = "Título válido", Company = "Acme", Description = new string('d', 40),
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+            SalaryMin = 6500.005m, SalaryMax = 9000.007m,
+        });
+        Assert.Equal(6500.01m, up.SalaryMin);
+        Assert.Equal(9000.01m, up.SalaryMax);
+
+        // .004 fica abaixo do meio: 6500.00.
+        var down = ValidateOk(new JobRequest
+        {
+            Title = "Título válido", Company = "Acme", Description = new string('d', 40),
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+            SalaryMin = 6500.004m,
+        });
+        Assert.Equal(6500.00m, down.SalaryMin);
+        Assert.Null(down.SalaryMax);
+    }
+
+    [Fact]
+    public void Salario_acima_do_limite_rejeitado()
+    {
+        var tooBig = new JobRequest
+        {
+            Title = "Título válido", Company = "Acme", Description = new string('d', 40),
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+            SalaryMin = 1_000_000_000_000m,
+        };
+        var validated = JobValidator.Validate(tooBig, out var errors);
+        Assert.Null(validated);
+        Assert.Contains(errors, e => e.Contains("salaryMin") && e.Contains("999999999999.99"));
+
+        // Na borda do numeric(14,2) (12 inteiros + 2 decimais): aceito.
+        var atLimit = ValidateOk(new JobRequest
+        {
+            Title = "Título válido", Company = "Acme", Description = new string('d', 40),
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+            SalaryMin = 999_999_999_999.99m,
+        });
+        Assert.Equal(999_999_999_999.99m, atLimit.SalaryMin);
+    }
+
+    [Fact]
+    public void Comparacao_de_faixa_pos_normalizacao()
+    {
+        // 6500.004 → 6500.00 e 6500.006 → 6500.01: faixa normalizada é válida, sem falso erro.
+        var req = new JobRequest
+        {
+            Title = "Título válido", Company = "Acme", Description = new string('d', 40),
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+            SalaryMin = 6500.004m, SalaryMax = 6500.006m,
+        };
+        var v = ValidateOk(req);
+        Assert.Equal(6500.00m, v.SalaryMin);
+        Assert.Equal(6500.01m, v.SalaryMax);
+
+        // Invertido: normalizados viram 6500.01/6500.00 → erro legítimo de faixa.
+        var inverted = new JobRequest
+        {
+            Title = "Título válido", Company = "Acme", Description = new string('d', 40),
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+            SalaryMin = 6500.006m, SalaryMax = 6500.004m,
+        };
+        Assert.Null(JobValidator.Validate(inverted, out _));
+    }
+
     [Fact]
     public void SameContentAs_ignora_timestamps_para_idempotencia()
     {

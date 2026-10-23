@@ -9,6 +9,20 @@ using TechJobs.Api.Platform.Runtime;
 
 namespace TechJobs.Api.Platform.Elastic;
 
+/// <summary>Resultado da garantia de índice no startup.</summary>
+public enum EnsureIndexResult
+{
+    /// <summary>Índice existe (ou foi criado agora) com o mapping atual — pronto para uso.</summary>
+    Ready,
+    /// <summary>
+    /// Índice existe, mas com mapping antigo (salário em double): mudança de tipo de campo
+    /// não é aplicável in-place no Elasticsearch — o chamador deve reconstruir a projeção.
+    /// </summary>
+    NeedsRebuild,
+    /// <summary>Falha ao consultar/criar o índice (ex.: Elasticsearch indisponível): tentar de novo.</summary>
+    Unavailable,
+}
+
 /// <summary>
 /// Projeção de busca no índice `techjobs-v1`. Toda operação checa a falha simulada
 /// primeiro e trata resposta inválida como indisponibilidade — a leitura pública
@@ -17,13 +31,8 @@ namespace TechJobs.Api.Platform.Elastic;
 public sealed class ElasticIndex
 {
     public const string IndexName = "techjobs-v1";
-
-    /// <summary>
-    /// Janela de from+size além do padrão (10.000): cobre o seed de 20 mil vagas do
-    /// desafio em qualquer página válida (pageSize até 50). Ver SearchQueryRunner.
-    /// </summary>
+    /// <summary>Janela from+size configurada no índice: paginação profunda sem 503.</summary>
     public const int MaxResultWindow = 50_000;
-
     private const int BulkChunkSize = 2000;
 
     private readonly ElasticsearchClient _client;
@@ -43,8 +52,14 @@ public sealed class ElasticIndex
             throw new SearchUnavailableException("A busca está temporariamente indisponível (Elasticsearch indisponível).");
     }
 
-    /// <summary>Cria o índice com mapping explícito se ainda não existir. Idempotente.</summary>
-    public async Task<bool> EnsureIndexAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Cria o índice com mapping explícito se ainda não existir; se existir, aplica settings
+    /// dinâmicos e verifica o tipo do campo salarial. Idempotente. Mudança de tipo de campo
+    /// (double → scaled_float) não é aplicável in-place no Elasticsearch: um índice criado
+    /// por base antiga sinaliza NeedsRebuild ao chamador (migração automática no startup) —
+    /// sem rebuild às cegas se o ES estiver fora (Unavailable → retry do StartupInitializer).
+    /// </summary>
+    public async Task<EnsureIndexResult> EnsureIndexAsync(CancellationToken ct = default)
     {
         var exists = await _client.Indices.ExistsAsync(IndexName, ct);
         if (exists.Exists)
@@ -56,7 +71,7 @@ public sealed class ElasticIndex
             if (!settings.IsValidResponse)
                 _logger.LogWarning("Aplicação de max_result_window no índice {Index} falhou: {Error}",
                     IndexName, settings.DebugInformation);
-            return true;
+            return await SalaryMappingNeedsRebuildAsync(ct);
         }
 
         var response = await _client.Indices.CreateAsync<JobDoc>(IndexName, c => c
@@ -76,17 +91,37 @@ public sealed class ElasticIndex
                     .Keyword("workMode")
                     .Keyword("city")
                     .Keyword("status")
-                    .DoubleNumber("salaryMin")
-                    .DoubleNumber("salaryMax")
+                    // scaled_float com escala 2 (fator 100): centavos exatos, tipo numérico
+                    // com escala definida (seção 10 do spec) — coerente com numeric(14,2).
+                    .ScaledFloatNumber("salaryMin", t => t.ScalingFactor(100))
+                    .ScaledFloatNumber("salaryMax", t => t.ScalingFactor(100))
                     .Date("publishedAt")
                     .Date("updatedAt"))), ct);
 
         if (!response.IsValidResponse && !IsIndexAlreadyExists(response.DebugInformation))
         {
             _logger.LogWarning("Criação do índice {Index} falhou: {Error}", IndexName, response.DebugInformation);
-            return false;
+            return EnsureIndexResult.Unavailable;
         }
-        return true;
+        return EnsureIndexResult.Ready;
+    }
+
+    /// <summary>Verifica se o índice existente ainda tem salário como double (mapping antigo).</summary>
+    private async Task<EnsureIndexResult> SalaryMappingNeedsRebuildAsync(CancellationToken ct)
+    {
+        var mapping = await _client.Indices.GetMappingAsync(new GetMappingRequest(IndexName), ct);
+        if (!mapping.IsValidResponse)
+        {
+            // Sem leitura de mapping não há reconstrução às cegas: retry no próximo loop.
+            _logger.LogWarning("Leitura do mapping do índice {Index} falhou: {Error}",
+                IndexName, mapping.DebugInformation);
+            return EnsureIndexResult.Unavailable;
+        }
+        if (mapping.Indices.TryGetValue(IndexName, out var record)
+            && record.Mappings.Properties.TryGetProperty("salaryMin", out var salaryMin)
+            && string.Equals(salaryMin.Type, "scaled_float", StringComparison.Ordinal))
+            return EnsureIndexResult.Ready;
+        return EnsureIndexResult.NeedsRebuild;
     }
 
     private static bool IsIndexAlreadyExists(string? debug) =>
@@ -98,7 +133,8 @@ public sealed class ElasticIndex
         EnsureAvailable();
         await _client.Indices.DeleteAsync(IndexName, ct);
         var created = await EnsureIndexAsync(ct);
-        if (!created) throw new SearchUnavailableException("Falha ao recriar o índice de busca.");
+        if (created != EnsureIndexResult.Ready)
+            throw new SearchUnavailableException("Falha ao recriar o índice de busca.");
     }
 
     public async Task<long> DeleteAllDocumentsAsync(CancellationToken ct = default)

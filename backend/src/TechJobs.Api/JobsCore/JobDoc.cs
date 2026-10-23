@@ -5,8 +5,10 @@ namespace TechJobs.Api.JobsCore;
 /// <summary>
 /// Projeção de busca (nunca fonte da verdade). Nomes de campo fixados com
 /// [JsonPropertyName] para garantir exatidão entre mapping, documento e queries.
-/// Salários são armazenados como double: é uma cópia para busca/filtro — o valor
-/// decimal autoritativo vive no PostgreSQL (numeric(14,2)).
+/// Salários são armazenados como double (JSON numérico): é uma cópia para busca/filtro —
+/// o valor decimal autoritativo vive no PostgreSQL (numeric(14,2)). No índice, o mapping
+/// usa scaled_float com scaling_factor 100 (escala 2 definida): os centavos são exatos,
+/// coerente com a normalização de 2 casas feita pelo JobValidator.
 /// </summary>
 public sealed class JobDoc
 {

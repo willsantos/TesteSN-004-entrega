@@ -38,6 +38,11 @@ public static class SearchJobsEndpoint
         });
     }
 
+    /// <summary>
+    /// O índice guarda salário em scaled_float (double com escala 2, fator 100): o round
+    /// para 2 casas (away from zero, igual ao numeric(14,2) do PostgreSQL) garante os
+    /// centavos exatos na saída decimal — mesma resposta da escrita e do GET por id.
+    /// </summary>
     private static decimal? ToDecimal(double? value) =>
-        value is null ? null : (decimal)value;
+        value is null ? null : Math.Round((decimal)value, 2, MidpointRounding.AwayFromZero);
 }
