@@ -47,6 +47,7 @@ builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(sp =>
     return ConnectionMultiplexer.Connect(options);
 });
 builder.Services.AddSingleton<CacheService>();
+builder.Services.AddSingleton<SingleFlight>();
 
 // ---- elastic/platform (projeção de busca + indexação por outbox) ----
 builder.Services.AddSingleton(_ => new ElasticsearchClient(

@@ -11,16 +11,34 @@ public static class UpdateJobEndpoint
 {
     public static void MapUpdateJobEndpoint(this IEndpointRouteBuilder app)
     {
-        app.MapPut("/api/jobs/{id:guid}", async (Guid id, HttpRequest request, JobStore store, CacheService cache, IndexingQueue indexingQueue) =>
+        app.MapPut("/api/jobs/{id:guid}", async (Guid id, HttpRequest request, JobStore store, CacheService cache, IndexingQueue indexingQueue, SingleFlight singleFlight) =>
         {
             var body = await ReadJobRequestAsync(request);
             var validated = ValidateOrThrow(body);
-            var job = await store.ReplaceAsync(id, validated, request.HttpContext.RequestAborted)
-                ?? throw new JobNotFoundException(id);
-            // Invalidação do cache de detalhe APÓS o commit — o valor antigo não volta.
-            await cache.DeleteKeyAsync(CacheKeys.DetailsKey(id), CacheCounters.Kind.Details);
-            indexingQueue.Wake(id);
-            return Results.Ok(JobResponse.From(job));
+            var key = CacheKeys.DetailsKey(id);
+            var aborted = request.HttpContext.RequestAborted;
+
+            // Commit + invalidação coalescidos com o preenchimento de detalhe da MESMA
+            // vaga na instância: fecha a janela GET×PUT (o fill nunca regrava valor
+            // anterior ao commit). Seguidor de OUTRO PUT (payload diferente) revalida:
+            // repete até executar a própria escrita — a última escrita sempre vence.
+            while (true)
+            {
+                var (job, executedFactory) = await singleFlight.CoalesceAsync(key, async _ =>
+                {
+                    var replaced = await store.ReplaceAsync(id, validated, aborted)
+                        ?? throw new JobNotFoundException(id);
+                    // Invalidação do cache de detalhe APÓS o commit — o valor antigo não volta.
+                    await cache.DeleteKeyAsync(key, CacheCounters.Kind.Details);
+                    return replaced;
+                }, aborted);
+
+                if (executedFactory)
+                {
+                    indexingQueue.Wake(id);
+                    return Results.Ok(JobResponse.From(job));
+                }
+            }
         });
     }
 
