@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createJob, updateJob } from '../api'
 import { ErrorBanner, Field, Spinner } from '../components/ui'
+import { parseSalaryInput } from '../salary'
 import type { Job, JobInput, JobStatus, Seniority, WorkMode } from '../types'
 
 interface FormState {
@@ -31,7 +32,7 @@ function fromJob(job: Job | null): FormState {
   }
 }
 
-function toInput(form: FormState): JobInput {
+function toInput(form: FormState, salaryMin: number | null, salaryMax: number | null): JobInput {
   return {
     title: form.title,
     company: form.company,
@@ -40,8 +41,8 @@ function toInput(form: FormState): JobInput {
     seniority: form.seniority,
     workMode: form.workMode,
     city: form.city.trim() === '' ? null : form.city.trim(),
-    salaryMin: form.salaryMin.trim() === '' ? null : Number(form.salaryMin),
-    salaryMax: form.salaryMax.trim() === '' ? null : Number(form.salaryMax),
+    salaryMin,
+    salaryMax,
     status: form.status,
   }
 }
@@ -56,15 +57,26 @@ export function JobFormPage({
   const [form, setForm] = useState<FormState>(() => fromJob(editing))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const [salaryErrors, setSalaryErrors] = useState<{ salaryMin?: string; salaryMax?: string }>({})
 
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }))
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const min = parseSalaryInput(form.salaryMin)
+    const max = parseSalaryInput(form.salaryMax)
+    if (!min.ok || !max.ok) {
+      setSalaryErrors({
+        salaryMin: min.ok ? undefined : min.error,
+        salaryMax: max.ok ? undefined : max.error,
+      })
+      return
+    }
+    setSalaryErrors({})
     setSaving(true)
     setError(null)
     try {
-      const input = toInput(form)
+      const input = toInput(form, min.value, max.value)
       const saved = editing ? await updateJob(editing.id, input) : await createJob(input)
       onSaved(saved)
     } catch (err) {
@@ -120,10 +132,28 @@ export function JobFormPage({
           </select>
         </Field>
         <Field label="Salário mínimo (R$, opcional)">
-          <input inputMode="decimal" value={form.salaryMin} onChange={(e) => set({ salaryMin: e.target.value })} placeholder="ex.: 6500" />
+          <input
+            inputMode="decimal"
+            value={form.salaryMin}
+            onChange={(e) => set({ salaryMin: e.target.value })}
+            placeholder="ex.: 6500"
+            aria-invalid={salaryErrors.salaryMin !== undefined || undefined}
+          />
+          {salaryErrors.salaryMin !== undefined && (
+            <p className="field-error" role="alert">{salaryErrors.salaryMin}</p>
+          )}
         </Field>
         <Field label="Salário máximo (R$, opcional)">
-          <input inputMode="decimal" value={form.salaryMax} onChange={(e) => set({ salaryMax: e.target.value })} placeholder="ex.: 8500" />
+          <input
+            inputMode="decimal"
+            value={form.salaryMax}
+            onChange={(e) => set({ salaryMax: e.target.value })}
+            placeholder="ex.: 8500"
+            aria-invalid={salaryErrors.salaryMax !== undefined || undefined}
+          />
+          {salaryErrors.salaryMax !== undefined && (
+            <p className="field-error" role="alert">{salaryErrors.salaryMax}</p>
+          )}
         </Field>
         <Field label="Situação">
           <select value={form.status} onChange={(e) => set({ status: e.target.value as JobStatus })}>

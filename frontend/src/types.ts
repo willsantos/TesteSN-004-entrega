@@ -92,7 +92,12 @@ export const emptyFilters: SearchFilters = {
 
 export function formatSalary(min: number | null, max: number | null): string {
   if (min === null && max === null) return 'Salário não informado'
-  const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+  // Centavos aparecem quando existem — a precisão salarial (P0.4) não pode sumir na exibição.
+  const fmt = (v: number) => v.toLocaleString('pt-BR', {
+    style: 'currency', currency: 'BRL',
+    minimumFractionDigits: Number.isInteger(v) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })
   if (min !== null && max !== null) return `${fmt(min)} – ${fmt(max)}`
   return min !== null ? `a partir de ${fmt(min)}` : `até ${fmt(max!)}`
 }

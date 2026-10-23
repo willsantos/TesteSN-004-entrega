@@ -9,9 +9,16 @@ const sorts: { value: SortOption; label: string }[] = [
   { value: 'salary_desc', label: 'Maior salário' },
 ]
 
-export function SearchPage({ onOpenJob }: { onOpenJob: (id: string) => void }) {
-  const [filters, setFilters] = useState<SearchFilters>(emptyFilters)
-  const [draft, setDraft] = useState<SearchFilters>(emptyFilters)
+export function SearchPage({
+  filters, onFiltersChange, onOpenJob,
+}: {
+  filters: SearchFilters
+  onFiltersChange: (filters: SearchFilters) => void
+  onOpenJob: (id: string) => void
+}) {
+  // Rascunho do formulário, inicializado a partir dos filtros aplicados
+  // (sobrevive à remontagem ao voltar do detalhe).
+  const [draft, setDraft] = useState<SearchFilters>(filters)
   const [result, setResult] = useState<SearchResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<unknown>(null)
@@ -27,7 +34,8 @@ export function SearchPage({ onOpenJob }: { onOpenJob: (id: string) => void }) {
     return () => { cancelled = true }
   }, [filters])
 
-  const apply = (next: SearchFilters) => setFilters({ ...next, page: 1 })
+  // Aplicar filtros explicitamente volta para a página 1.
+  const apply = (next: SearchFilters) => onFiltersChange({ ...next, page: 1 })
 
   const set = (patch: Partial<SearchFilters>) => setDraft((d) => ({ ...d, ...patch }))
 
@@ -134,7 +142,7 @@ export function SearchPage({ onOpenJob }: { onOpenJob: (id: string) => void }) {
               page={result.page}
               pageSize={result.pageSize}
               total={result.total}
-              onPage={(page) => setFilters({ ...filters, page })}
+              onPage={(page) => onFiltersChange({ ...filters, page })}
             />
           )}
         </>

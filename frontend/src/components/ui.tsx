@@ -41,7 +41,13 @@ export function TechChips({ technologies }: { technologies: string[] }) {
 
 export function JobCard({ job, onOpen }: { job: SearchItem; onOpen: (id: string) => void }) {
   return (
-    <article className="card job-card" onClick={() => onOpen(job.id)}>
+    <article className="card job-card">
+      <button
+        type="button"
+        className="job-card-open"
+        aria-label={`Abrir vaga: ${job.title}`}
+        onClick={() => onOpen(job.id)}
+      />
       <div className="job-card-head">
         <div>
           <h3>{job.title}</h3>
