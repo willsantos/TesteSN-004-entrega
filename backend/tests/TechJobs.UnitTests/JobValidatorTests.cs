@@ -197,7 +197,6 @@ public class JobValidatorTests
         Assert.Null(v.City);
     }
 
-
     [Fact]
     public void Salario_normalizado_para_duas_casas()
     {
@@ -280,5 +279,30 @@ public class JobValidatorTests
 
         var changed = v with { Title = "Outro título válido" };
         Assert.False(job.SameContentAs(changed));
+    }
+
+    [Fact]
+    public void Validacao_nao_ecoa_conteudo_de_texto_livre()
+    {
+        // Payload inválido com marcadores sensíveis nos três campos de texto livre.
+        var r = new JobRequest
+        {
+            Title = new string('x', 185) + "MARKER-SENSITIVO-ABC", // 205 chars > 160
+            Company = "MARKER3" + new string('y', 194),            // 200 chars > 120
+            Description = "OUTRO-MARKER-XYZ",                      // 16 chars < 30
+            Technologies = ["x"], Seniority = "pleno", WorkMode = "remoto",
+        };
+        var validated = JobValidator.Validate(r, out var errors);
+        Assert.Null(validated);
+
+        var all = string.Join('\n', errors);
+        Assert.DoesNotContain("MARKER-SENSITIVO-ABC", all);
+        Assert.DoesNotContain("OUTRO-MARKER-XYZ", all);
+        Assert.DoesNotContain("MARKER3", all);
+
+        // O comprimento é reportado, não o conteúdo.
+        Assert.Contains(errors, e => e.StartsWith("title") && e.Contains("caracteres"));
+        Assert.Contains(errors, e => e.StartsWith("company") && e.Contains("caracteres"));
+        Assert.Contains(errors, e => e.StartsWith("description") && e.Contains("caracteres"));
     }
 }

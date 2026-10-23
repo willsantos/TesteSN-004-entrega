@@ -23,8 +23,11 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
 
         if (status == 500)
             logger.LogError(exception, "Erro não tratado em {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+        // Log sem o conteúdo do detail: ele pode ecoar payload enviado pelo usuário
+        // (ex.: mensagens de validação) e não deve parar em logs. O detail segue
+        // intacto apenas no CORPO da resposta Problem Details.
         else
-            logger.LogInformation("Respondendo {Status} para {Method} {Path}: {Detail}", status, httpContext.Request.Method, httpContext.Request.Path, detail);
+            logger.LogInformation("Respondendo {Status} para {Method} {Path}", status, httpContext.Request.Method, httpContext.Request.Path);
 
         var payload = new ProblemDetailsPayload(type, title, status, detail);
         httpContext.Response.StatusCode = status;

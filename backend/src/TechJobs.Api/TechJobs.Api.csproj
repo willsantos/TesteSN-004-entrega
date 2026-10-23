@@ -11,8 +11,11 @@
     <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="8.16.3" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
-    <!-- Pin explícito acima da versão vulnerável transitiva (NU1903). -->
-    <PackageReference Include="Microsoft.OpenApi" Version="2.4.1" />
+    <!-- Pin explícito na versão CORRIGIDA da linha 2.x (GHSA-v5pm-xwqc-g5wc /
+         CVE-2026-49451 afeta 2.x <= 2.7.4; 2.7.5 corrige) — compatível com
+         Microsoft.AspNetCore.OpenApi 10.x. Sem isso o NU1903 volta via referência
+         transitiva. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
   </ItemGroup>
 
 </Project>

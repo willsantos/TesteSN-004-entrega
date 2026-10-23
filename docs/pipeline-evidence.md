@@ -11,9 +11,9 @@ DevOps (ou espelhar via Azure Pipelines com conexão GitHub).
 |---|---|---|
 | **Build** | Restore + build + **testes de unidade** (backend, via template reutilizável `pipelines/templates/dotnet-build-test.yml`) e build do frontend (`tsc` estrito + `vite`) | Sim — Test depende de Build |
 | **Test** | Testes de **integração black-box**: sobe a stack inteira com `docker compose up` e roda a suíte de contrato contra `http://localhost:8080` | Sim — Package depende de Test |
-| **Package** | `dotnet publish` + `docker build/push` da imagem para o ACR com tag **imutável** `$(Build.BuildId)` + artefato versionado (`PublishBuildArtifacts`) com arquivo `VERSION.txt` | — (é o gate) |
-| **DeployStaging** | `deployment` job no environment `techjobs-staging` + smoke test de `/health` | Sim — produção depende de staging |
-| **DeployProduction** | `deployment` job no environment `techjobs-prod` — **pausa na aprovação** | — |
+| **Package** | `dotnet publish` + build/push da imagem para o ACR (task `Docker@2` com service connection `techjobs-registry`) com tag **imutável** `$(Build.BuildId)` + artefato versionado (`PublishBuildArtifacts`) com arquivo `VERSION.txt` | — (é o gate) |
+| **DeployStaging** | `deployment` job no environment `techjobs-staging` + smoke test de `/health` (deploy é **placeholder `echo`** — ver seção "O que executa de verdade hoje") | Sim — produção depende de staging |
+| **DeployProduction** | `deployment` job no environment `techjobs-prod` — **pausa na aprovação** (deploy é **placeholder `echo`**) | — |
 
 ### Por que teste falho impede o deploy (evidence)
 
@@ -47,19 +47,46 @@ aprovação não pode ser versionada/burlada por um PR.
 
 ## Rollback / redeploy da versão anterior
 
-Duas rotas, da mais rápida para a mais controlada:
+Rollback = **REDEPLOY de uma versão anterior já publicada**, nunca re-empacotamento.
+Cada run publica imagem com tag imutável `techjobs-api:<BuildId>`; as tags antigas
+permanecem no ACR, o que torna o redeploy determinístico:
 
-1. **Rerun de um run anterior saudável** — Runs → selecionar o run verde anterior →
-   **Rerun** (ou "Rerun failed jobs"). Como cada run empacota a própria imagem
-   (`techjobs-api:<BuildId>`), o rerun repõe exatamente a versão anterior.
-2. **Redeploy do artefato** — Runs → run verde anterior → stage `DeployProduction` →
-   **Redeploy release/stage**. O Azure DevOps rebaixa o mesmo artefato imutável,
-   sem re-build nem re-teste (o artefato já passou pelos gates).
+1. **Redeploy da tag/digest anterior** — reapontar o deploy para a imagem anterior
+   (`kubectl set image deployment/techjobs-api api=$(registryServer)/techjobs-api:<BuildIdAnterior> -n prod`),
+   ou rodar novamente o stage de deploy de um run anterior apontando para essa tag
+   imutável (o artefato/imagem já passou pelos gates; nada é re-buildado).
+2. **Kubernetes nativo** — `kubectl rollout undo deployment/techjobs-api` volta ao
+   ReplicaSet anterior (a spec do deployment referencia a tag antiga, que segue no ACR).
 
-Em Kubernetes/AKS, o equivalente de emergência é apontar o deployment de volta à tag
-da imagem anterior (`kubectl rollout undo deployment/techjobs-api`), pois a tag antiga
-continua no ACR — **nunca** sobrescreva uma tag existente; o pipeline sempre gera tags
+**Rerun do pipeline NÃO é rollback.** Rerun **RE-EMPACOTA**: reexecuta build e testes e
+publica uma **nova** imagem (novo `BuildId`), mesmo sobre o mesmo commit — a tag anterior
+não é reaproveitada. Para voltar a uma versão, redeployie a tag/digest imutável anterior.
+Em qualquer rota, **nunca** sobrescreva uma tag existente; o pipeline sempre gera tags
 novas por `BuildId`.
+
+## Pré-requisitos externos (configuração fora do YAML)
+
+Este pipeline só funciona após provisionar, no Azure DevOps:
+
+- **Variable group `techjobs-common`**: variáveis não-secretas `registryServer`,
+  `stagingHealthUrl` e `prodHealthUrl` (segredos ficam no Key Vault vinculado — ver
+  seção abaixo).
+- **Service connection `techjobs-registry`** (Project settings → Service connections):
+  credenciais do ACR usadas pelo task `Docker@2` do stage Package.
+- **Environments** `techjobs-staging` e `techjobs-prod`, com approval/checks — a
+  aprovação de produção é um check do environment (ver seção acima).
+
+## O que executa de verdade hoje × o que é configuração proposta
+
+- **EXECUTADO de verdade hoje**: `.github/workflows/ci.yml` (GitHub Actions) — é ele que
+  roda no repo (build + testes). Os testes de integração dependem de `TECHJOBS_API`.
+- **CONFIGURAÇÃO PROPOSTA (evidência documental)**: o `azure-pipelines.yml` desenha o
+  fluxo completo Build → Test → Package → DeployStaging → DeployProduction no Azure
+  DevOps, mas **não executa neste host** — executaria ao importar o repo no Azure DevOps.
+  Em particular, os steps de deploy de staging/produção são **placeholders `echo`**
+  (nenhuma infraestrutura real é acionada — eles apenas registram o comando
+  `kubectl set image` que um deploy real executaria), e o push de imagem depende dos
+  pré-requisitos externos listados acima.
 
 ## Onde vivem os segredos
 

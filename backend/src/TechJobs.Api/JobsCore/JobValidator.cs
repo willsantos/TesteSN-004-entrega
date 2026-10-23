@@ -31,7 +31,7 @@ public static class JobValidator
 
         var description = (request.Description ?? "").Trim();
         if (description.Length < 30)
-            list.Add($"description deve ter no mínimo 30 caracteres (recebido: {Quote(request.Description)}).");
+            list.Add($"description deve ter no mínimo 30 caracteres (recebido: {Received(request.Description)}).");
 
         var technologies = NormalizeTechnologies(request.Technologies);
         if (technologies.Count == 0)
@@ -99,8 +99,19 @@ public static class JobValidator
         return result;
     }
 
+    /// <summary>
+    /// Campos de texto livre (title/company/description) ecoam apenas o COMPRIMENTO
+    /// validado (pós-trim), nunca o CONTEÚDO: o payload vem do usuário e não deve
+    /// vazar para logs/respostas. Enums controlados continuam ecoando o valor (Quote).
+    /// </summary>
+    private static string Received(string? raw)
+    {
+        var v = (raw ?? "").Trim();
+        return v.Length == 0 ? "vazio" : $"{v.Length} caracteres";
+    }
+
     private static string LengthMessage(string field, string? received, string range) =>
-        $"{field} é obrigatório e deve ter entre {range} (recebido: {Quote(received)}).";
+        $"{field} é obrigatório e deve ter entre {range} (recebido: {Received(received)}).";
 
     private static string Quote(string? value)
     {

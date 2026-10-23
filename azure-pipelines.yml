@@ -118,17 +118,30 @@ stages:
             inputs:
               targetType: 'inline'
               script: |
-                "$env:BUILD_BUILDNUMBER ($env:BUILD_SOURCEVERSIONSUBSTRING)" | Out-File "$(Build.ArtifactStagingDirectory)/api/VERSION.txt"
+                # BUILD_SOURCEVERSIONSUBSTRING não existe no Azure DevOps; derivamos
+                # o SHA curto (7 primeiros chars) da variável BUILD_SOURCEVERSION.
+                $sha = if ($env:BUILD_SOURCEVERSION -and $env:BUILD_SOURCEVERSION.Length -ge 7) { $env:BUILD_SOURCEVERSION.Substring(0,7) } else { 'unknown' }
+                "$env:BUILD_BUILDNUMBER ($sha)" | Out-File "$(Build.ArtifactStagingDirectory)/api/VERSION.txt"
           - task: PublishBuildArtifacts@1
             displayName: 'Publica artefato'
             inputs:
               pathToPublish: '$(Build.ArtifactStagingDirectory)/api'
               artifactName: '$(artifactName)'
-          # Para registro de contêiner, troque por docker build + push para o ACR
-          # referenciando a service connection (credenciais ficam na service connection).
-          - script: |
-              docker build -t $(registryServer)/techjobs-api:$(Build.BuildId) backend
-              docker push $(registryServer)/techjobs-api:$(Build.BuildId)
+          # Push autenticado: o task Docker@2 usa a service connection 'techjobs-registry'
+          # (PRÉ-REQUISITO EXTERNO — criar em Project settings → Service connections;
+          # as credenciais do ACR vivem nela, nunca no YAML). O Dockerfile real fica em
+          # backend/Dockerfile e espera o contexto 'backend' (COPY . . é relativo a ele).
+          # Evidência documental: este stage não executa neste repo (GitHub Actions), mas
+          # o desenho é internamente coerente — ver docs/pipeline-evidence.md.
+          - task: Docker@2
+            inputs:
+              command: 'buildAndPush'
+              containerRegistry: 'techjobs-registry'
+              repository: '$(registryServer)/techjobs-api'
+              dockerfile: 'backend/Dockerfile'
+              buildContext: 'backend'
+              tags: '$(Build.BuildId)'
+
             displayName: 'Build + push da imagem (ACR via service connection)'
 
   # ---------------------------------------------------------------- DeployStaging
