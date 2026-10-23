@@ -185,6 +185,44 @@ public class ResilienceTests : IAsyncLifetime
     }
 
     [LiveApiFact]
+    public async Task Put_durante_falha_elasticsearch_persiste_e_drain_recupera()
+    {
+        using var http = ApiClient.Create();
+
+        // Vaga pré-existente (fora da falha): alvo do PUT
+        string id;
+        {
+            using var created = await http.PostAsync("/api/jobs", ApiClient.JsonBody(ValidJob("Titulo Original ES Fault")));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            id = (await ApiClient.ReadJson(created)).GetProperty("id").GetString()!;
+        }
+
+        await SetFault(http, "elasticsearch", true);
+
+        // Confirma que a falha está ativa: busca → 503 Problem Details controlado
+        using (var search = await http.GetAsync("/api/jobs/search?q=x"))
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, search.StatusCode);
+
+        // Atualização NÃO pode falhar nem se perder: 200 confirmado no PostgreSQL
+        using (var put = await http.PutAsync($"/api/jobs/{id}", ApiClient.JsonBody(ValidJob("Reescrita Com ES Fora"))))
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        await SetFault(http, "elasticsearch", false);
+        using (var drain = await http.PostAsync("/admin/indexing/drain", null))
+            Assert.True(drain.IsSuccessStatusCode);
+
+        // Índice recuperado: a busca reflete o conteúdo NOVO do PUT (não o original)
+        using (var search = await http.GetAsync("/api/jobs/search?q=reescrita"))
+        {
+            Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+            var body = await ApiClient.ReadJson(search);
+            var item = Assert.Single(body.GetProperty("items").EnumerateArray(),
+                i => i.GetProperty("id").GetString() == id);
+            Assert.Equal("Reescrita Com ES Fora", item.GetProperty("title").GetString());
+        }
+    }
+
+    [LiveApiFact]
     public async Task Reindex_reconstrui_sem_duplicar()
     {
         using var http = ApiClient.Create();

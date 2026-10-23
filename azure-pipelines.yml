@@ -68,15 +68,22 @@ stages:
           - task: UseDotNet@2
             inputs:
               version: '10.0.x'
-          - script: docker compose up -d --build
-            displayName: 'Sobe a stack completa'
+          - script: docker compose --profile adminoff --profile shortttl up -d --build
+            displayName: 'Sobe a stack completa (perfis adminoff + shortttl)'
           - script: |
               deadline=$((SECONDS + 240))
               until curl -sf http://localhost:8080/health >/dev/null; do
                 if (( SECONDS > deadline )); then echo "API não saudável"; docker compose logs --tail 100; exit 1; fi
                 sleep 3
               done
-            displayName: 'Aguarda API saudável'
+              for port in 8085 8086; do
+                deadline=$((SECONDS + 120))
+                until curl -sf http://localhost:${port}/health >/dev/null; do
+                  if (( SECONDS > deadline )); then echo "API auxiliar :${port} não saudável"; docker compose logs --tail 100; exit 1; fi
+                  sleep 3
+                done
+              done
+            displayName: 'Aguarda APIs saudáveis (8080 + auxiliares 8085/8086)'
           - task: DotNetCoreCLI@2
             displayName: 'dotnet test (integração)'
             inputs:
@@ -85,6 +92,10 @@ stages:
               arguments: '--logger trx --results-directory $(Agent.TempDirectory)'
             env:
               TECHJOBS_API: 'http://localhost:8080'
+              TECHJOBS_API_NOADMIN: 'http://localhost:8085'
+              TECHJOBS_API_SHORTTTL: 'http://localhost:8086'
+              # Modo estrito: nunca pular teste por API fora do ar — suíte tem que ficar vermelha.
+              TECHJOBS_REQUIRE_API: 'true'
           - task: PublishTestResults@2
             displayName: 'Publicar resultados'
             condition: succeededOrFailed()
@@ -134,6 +145,7 @@ stages:
           # Evidência documental: este stage não executa neste repo (GitHub Actions), mas
           # o desenho é internamente coerente — ver docs/pipeline-evidence.md.
           - task: Docker@2
+            displayName: 'Build + push da imagem (ACR via service connection)'
             inputs:
               command: 'buildAndPush'
               containerRegistry: 'techjobs-registry'
@@ -141,8 +153,6 @@ stages:
               dockerfile: 'backend/Dockerfile'
               buildContext: 'backend'
               tags: '$(Build.BuildId)'
-
-            displayName: 'Build + push da imagem (ACR via service connection)'
 
   # ---------------------------------------------------------------- DeployStaging
   - stage: DeployStaging

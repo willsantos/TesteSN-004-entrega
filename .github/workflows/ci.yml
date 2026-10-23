@@ -25,8 +25,8 @@ jobs:
       - name: Testes de unidade (validação, chave de cache, seed)
         run: dotnet test backend/TechJobs.slnx --filter "FullyQualifiedName~UnitTests"
 
-      - name: Sobe a stack
-        run: docker compose up -d --build
+      - name: Sobe a stack (perfis adminoff + shortttl incluem as APIs auxiliares)
+        run: docker compose --profile adminoff --profile shortttl up -d --build
 
       - name: Aguarda API saudável (GET /health)
         run: |
@@ -40,13 +40,49 @@ jobs:
           done
           echo "API saudável."
 
+      - name: Aguarda APIs auxiliares saudáveis (:8085 sem /admin, :8086 com TTL curto)
+        run: |
+          for port in 8085 8086; do
+            deadline=$((SECONDS + 120))
+            until curl -sf http://localhost:${port}/health >/dev/null; do
+              if (( SECONDS > deadline )); then
+                echo "API auxiliar na porta ${port} não respondeu em /health dentro de 120s"
+                docker compose logs --tail 100 api-noadmin api-shortttl
+                exit 1
+              fi
+              sleep 2
+            done
+            echo "API auxiliar :${port} saudável."
+          done
+
       - name: Frontend responde
         run: curl -sf http://localhost:3000/ >/dev/null
 
-      - name: Testes de integração (contrato de API, cache, falhas simuladas)
+      # Projeto de integração direto (e não a slnx) para um TRX único e determinístico.
+      - name: Testes de integração (contrato de API, cache, falhas simuladas, perfis)
         env:
           TECHJOBS_API: 'http://localhost:8080'
-        run: dotnet test backend/TechJobs.slnx --filter "FullyQualifiedName~IntegrationTests"
+          TECHJOBS_API_NOADMIN: 'http://localhost:8085'
+          TECHJOBS_API_SHORTTTL: 'http://localhost:8086'
+          # Modo estrito: nunca pular teste por API fora do ar — suíte tem que ficar vermelha.
+          TECHJOBS_REQUIRE_API: 'true'
+        run: >
+          dotnet test backend/tests/TechJobs.IntegrationTests/TechJobs.IntegrationTests.csproj
+          --filter "FullyQualifiedName~IntegrationTests"
+          --logger "trx;LogFileName=integration.trx"
+          --results-directory TestResults
+
+      # Falso verde: TRX com teste não executado (skip após a descoberta) tem que falhar o job.
+      - name: Falha se o TRX contiver testes não executados
+        run: grep -q 'NotExecuted' TestResults/integration.trx && exit 1 || true
+
+      - name: Publica TRX da integração
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-trx
+          path: TestResults/integration.trx
+          if-no-files-found: warn
 
       - name: Logs em caso de falha
         if: failure()

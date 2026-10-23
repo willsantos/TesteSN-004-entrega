@@ -62,6 +62,54 @@ services:
       elasticsearch:
         condition: service_healthy
 
+  # Instâncias auxiliares de teste em profiles: `docker compose up` sem --profile
+  # as ignora — o comportamento padrão da stack fica inalterado.
+  # api-noadmin: prova que, sem ENABLE_TEST_ENDPOINTS, o /admin some (404) e as
+  # rotas públicas seguem intactas.
+  api-noadmin:
+    profiles: ["adminoff"]
+    build: ./backend
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ConnectionStrings__Postgres: Host=postgres;Database=techjobs;Username=techjobs;Password=techjobs
+      ConnectionStrings__Redis: redis:6379
+      Elasticsearch__Url: http://elasticsearch:9200
+      Cache__DetailsTtlSeconds: "300"
+      Cache__SearchTtlSeconds: "60"
+      ENABLE_TEST_ENDPOINTS: "false"
+    ports:
+      - "127.0.0.1:8085:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  # api-shortttl: TTL de 2s em detalhe/busca — permite testar a expiração REAL do
+  # cache (chave saindo do Redis) sem esperar os 300s/60s do padrão.
+  api-shortttl:
+    profiles: ["shortttl"]
+    build: ./backend
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ConnectionStrings__Postgres: Host=postgres;Database=techjobs;Username=techjobs;Password=techjobs
+      ConnectionStrings__Redis: redis:6379
+      Elasticsearch__Url: http://elasticsearch:9200
+      Cache__DetailsTtlSeconds: "2"
+      Cache__SearchTtlSeconds: "2"
+      ENABLE_TEST_ENDPOINTS: "true"
+    ports:
+      - "127.0.0.1:8086:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     ports:
